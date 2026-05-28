@@ -12,6 +12,9 @@
     data-product-id="{{ product.id }}"
     data-product-handle="{{ product.handle | escape }}"
     data-trustpilot-url="{{ section.settings.trustpilot_url | escape }}"
+    data-star-empty="{{ section.settings.trustpilot_star_empty_url | escape }}"
+    data-star-half="{{ section.settings.trustpilot_star_half_url | escape }}"
+    data-star-full="{{ section.settings.trustpilot_star_full_url | escape }}"
   >
     <div class="ws-reviews__heading">
       <div>
@@ -39,7 +42,13 @@
           <span>★</span>
         </div>
         <strong data-ws-rating-label>Eccellente</strong>
-        <div class="ws-reviews__stars" data-ws-stars>★★★★★</div>
+        <div class="ws-reviews__trust-stars" data-ws-trust-stars aria-label="Valutazione Trustpilot">
+          <img src="{{ section.settings.trustpilot_star_empty_url | escape }}" alt="" loading="lazy" width="24" height="24">
+          <img src="{{ section.settings.trustpilot_star_empty_url | escape }}" alt="" loading="lazy" width="24" height="24">
+          <img src="{{ section.settings.trustpilot_star_empty_url | escape }}" alt="" loading="lazy" width="24" height="24">
+          <img src="{{ section.settings.trustpilot_star_empty_url | escape }}" alt="" loading="lazy" width="24" height="24">
+          <img src="{{ section.settings.trustpilot_star_empty_url | escape }}" alt="" loading="lazy" width="24" height="24">
+        </div>
         <a href="{{ section.settings.trustpilot_url }}" target="_blank" rel="noopener">
           Basato su <span data-ws-total>0</span> recensioni
         </a>
@@ -95,6 +104,11 @@
       var productId = root.dataset.productId;
       var productHandle = root.dataset.productHandle;
       var cards = root.querySelector('[data-ws-review-cards]');
+      var starUrls = {
+        empty: root.dataset.starEmpty,
+        half: root.dataset.starHalf,
+        full: root.dataset.starFull
+      };
       var allReviews = [];
       var activeFilter = 'all';
 
@@ -139,8 +153,8 @@
         setText('[data-ws-average]', averageText);
         setText('[data-ws-average-label]', averageText);
         setText('[data-ws-total]', total.toLocaleString('it-IT'));
-        setText('[data-ws-stars]', stars(Math.round(average || 5)));
-        setText('[data-ws-rating-label]', average >= 4.5 ? 'Eccellente' : average >= 4 ? 'Molto buono' : 'Buono');
+        setTrustStars(total ? average : 0);
+        setText('[data-ws-rating-label]', !total ? 'Nessuna recensione' : average >= 4.5 ? 'Eccellente' : average >= 4 ? 'Molto buono' : 'Buono');
 
         (data.distribution || []).forEach(function (item) {
           var row = root.querySelector('[data-ws-bar-row="' + item.rating + '"]');
@@ -222,6 +236,27 @@
       function stars(rating) {
         var value = Math.max(1, Math.min(5, Number(rating) || 5));
         return '★★★★★'.slice(0, value) + '☆☆☆☆☆'.slice(0, 5 - value);
+      }
+
+      function setTrustStars(rating) {
+        var wrapper = root.querySelector('[data-ws-trust-stars]');
+        if (!wrapper) return;
+        var value = Math.max(0, Math.min(5, Number(rating) || 0));
+
+        wrapper.querySelectorAll('img').forEach(function (image, index) {
+          var progress = value - index;
+          var src = starUrls.empty;
+
+          if (progress >= 0.75) {
+            src = starUrls.full;
+          } else if (progress >= 0.25) {
+            src = starUrls.half;
+          }
+
+          if (src) image.src = src;
+        });
+
+        wrapper.setAttribute('aria-label', value.toFixed(1) + ' su 5');
       }
 
       function relativeDate(value) {
@@ -385,6 +420,20 @@
     color: #05883d;
     font-size: 12px;
     font-weight: 900;
+  }
+
+  .ws-reviews__trust-stars {
+    display: grid;
+    grid-template-columns: repeat(5, 24px);
+    gap: 3px;
+    align-items: center;
+    width: max-content;
+  }
+
+  .ws-reviews__trust-stars img {
+    display: block;
+    width: 24px;
+    height: 24px;
   }
 
   .ws-reviews__stars {
@@ -674,6 +723,24 @@
       "id": "trustpilot_logo_url",
       "label": "Logo Trustpilot SVG",
       "default": "https://cdn.shopify.com/s/files/1/0555/0601/0321/files/Trustpilot_Logo__2022.svg?v=1779989756"
+    },
+    {
+      "type": "text",
+      "id": "trustpilot_star_empty_url",
+      "label": "Stella Trustpilot grigia",
+      "default": "https://cdn.shopify.com/s/files/1/0555/0601/0321/files/TRUSTPILOT_1.svg?v=1779990537"
+    },
+    {
+      "type": "text",
+      "id": "trustpilot_star_half_url",
+      "label": "Stella Trustpilot metà",
+      "default": "https://cdn.shopify.com/s/files/1/0555/0601/0321/files/TRUSTPILOT_3.svg?v=1779990536"
+    },
+    {
+      "type": "text",
+      "id": "trustpilot_star_full_url",
+      "label": "Stella Trustpilot verde",
+      "default": "https://cdn.shopify.com/s/files/1/0555/0601/0321/files/TRUSTPILOT_2.svg?v=1779990535"
     }
   ],
   "presets": [
