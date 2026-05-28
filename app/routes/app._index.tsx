@@ -124,7 +124,7 @@ async function handleAction(request: Request) {
 
   if (intent === "delete") {
     const id = String(formData.get("id") ?? "");
-    await reviewClient.deleteMany({ where: { id, shop } });
+    await runDatabaseWrite("review delete", () => reviewClient.deleteMany({ where: { id, shop } }));
     return { ok: true, message: "Recensione eliminata." } satisfies ActionData;
   }
 
@@ -156,14 +156,16 @@ async function handleAction(request: Request) {
 
   if (intent === "delete-category") {
     const id = String(formData.get("id") ?? "");
-    await categoryClient.deleteMany({ where: { id, shop } }).catch(() => null);
+    await runDatabaseWrite("category delete", () => categoryClient.deleteMany({ where: { id, shop } })).catch(() => null);
     return { ok: true, message: "Categoria eliminata." } satisfies ActionData;
   }
 
   if (intent === "toggle") {
     const id = String(formData.get("id") ?? "");
     const published = String(formData.get("published") ?? "false") === "true";
-    await reviewClient.updateMany({ where: { id, shop }, data: { published } });
+    await runDatabaseWrite("review publish toggle", () =>
+      reviewClient.updateMany({ where: { id, shop }, data: { published } }),
+    );
     return {
       ok: true,
       message: published ? "Recensione pubblicata." : "Recensione nascosta.",
@@ -228,19 +230,25 @@ async function createReviews(reviews: ProductReviewInput[]) {
   const data = reviews.map(stripEmptyCategoryId);
 
   try {
-    await reviewClient.createMany({ data });
+    await runDatabaseWrite("reviews full import", () => reviewClient.createMany({ data }));
   } catch (error) {
     console.error("WOWstampa reviews full import failed, retrying legacy payload", error);
-    await reviewClient.createMany({ data: reviews.map(toLegacyReviewInput) });
+    await runDatabaseWrite("reviews legacy import", () =>
+      reviewClient.createMany({ data: reviews.map(toLegacyReviewInput) }),
+    );
   }
 }
 
 async function createReview(review: ProductReviewInput) {
   try {
-    await reviewClient.createMany({ data: [stripEmptyCategoryId(review)] });
+    await runDatabaseWrite("review full create", () =>
+      reviewClient.createMany({ data: [stripEmptyCategoryId(review)] }),
+    );
   } catch (error) {
     console.error("WOWstampa reviews full create failed, retrying legacy payload", error);
-    await reviewClient.createMany({ data: [toLegacyReviewInput(review)] });
+    await runDatabaseWrite("review legacy create", () =>
+      reviewClient.createMany({ data: [toLegacyReviewInput(review)] }),
+    );
   }
 }
 
@@ -719,6 +727,57 @@ function parseDate(value: unknown) {
   if (!text) return null;
   const date = new Date(text);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+async function runDatabaseWrite<T>(label: string, operation: () => Promise<T>) {
+  const maxAttempts = 4;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      console.error(`WOWstampa reviews ${label} failed on attempt ${attempt}`, error);
+
+      if (attempt === maxAttempts || !isRetryableDatabaseError(error)) break;
+      await delay(250 * attempt);
+    }
+  }
+
+  throw lastError;
+}
+
+function isRetryableDatabaseError(error: unknown) {
+  const message = getErrorText(error).toLowerCase();
+  return [
+    "p1001",
+    "p1002",
+    "p1017",
+    "p2024",
+    "p2034",
+    "can't reach database",
+    "connection",
+    "connect",
+    "closed",
+    "pool",
+    "timeout",
+    "timed out",
+  ].some((token) => message.includes(token));
+}
+
+function getErrorText(error: unknown) {
+  if (!error) return "";
+  if (error instanceof Error) return `${error.name} ${error.message}`;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function parseBoolean(value: unknown, fallback = true) {
