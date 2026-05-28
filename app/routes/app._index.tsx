@@ -237,10 +237,10 @@ async function createReviews(reviews: ProductReviewInput[]) {
 
 async function createReview(review: ProductReviewInput) {
   try {
-    await reviewClient.create({ data: stripEmptyCategoryId(review) });
+    await reviewClient.createMany({ data: [stripEmptyCategoryId(review)] });
   } catch (error) {
     console.error("WOWstampa reviews full create failed, retrying legacy payload", error);
-    await reviewClient.create({ data: toLegacyReviewInput(review) });
+    await reviewClient.createMany({ data: [toLegacyReviewInput(review)] });
   }
 }
 
