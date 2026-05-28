@@ -78,16 +78,8 @@ const PRODUCTS_QUERY = `#graphql
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { shop, products } = await getShopContext(request);
-  const reviews = await reviewClient.findMany({
-    where: { shop },
-    include: { category: true },
-    orderBy: [{ published: "desc" }, { createdAt: "desc" }],
-    take: 100,
-  });
-  const categories = await categoryClient.findMany({
-    where: { shop },
-    orderBy: [{ name: "asc" }],
-  });
+  const reviews = await loadReviews(shop);
+  const categories = await loadCategories(shop);
 
   return {
     products,
@@ -119,18 +111,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { ok: false, errors: ["Inserisci nome e chiave categoria."] } satisfies ActionData;
     }
 
-    await categoryClient.upsert({
-      where: { shop_key: { shop, key } },
-      create: { shop, key, name, productHandles, productIds },
-      update: { name, productHandles, productIds },
-    });
+    try {
+      await categoryClient.upsert({
+        where: { shop_key: { shop, key } },
+        create: { shop, key, name, productHandles, productIds },
+        update: { name, productHandles, productIds },
+      });
+    } catch {
+      return {
+        ok: false,
+        errors: ["Categorie non ancora disponibili: verifica che la migration Supabase sia stata applicata."],
+      } satisfies ActionData;
+    }
 
     return { ok: true, message: "Categoria recensioni salvata." } satisfies ActionData;
   }
 
   if (intent === "delete-category") {
     const id = String(formData.get("id") ?? "");
-    await categoryClient.deleteMany({ where: { id, shop } });
+    await categoryClient.deleteMany({ where: { id, shop } }).catch(() => null);
     return { ok: true, message: "Categoria eliminata." } satisfies ActionData;
   }
 
@@ -151,7 +150,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       csvFile && typeof (csvFile as any).text === "function"
         ? await (csvFile as any).text()
         : pastedCsv;
-    const categories = await categoryClient.findMany({ where: { shop } });
+    const categories = await loadCategories(shop);
     const categoriesByKey = new Map<string, string>(
       categories.map((category: any) => [String(category.key), String(category.id)]),
     );
@@ -166,7 +165,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       } satisfies ActionData;
     }
 
-    await reviewClient.createMany({ data: reviews });
+    await reviewClient.createMany({ data: reviews.map(stripEmptyCategoryId) });
     return { ok: true, message: `${reviews.length} recensioni importate.` } satisfies ActionData;
   }
 
@@ -194,9 +193,53 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const errors = validateReview(review);
   if (errors.length) return { ok: false, errors } satisfies ActionData;
 
-  await reviewClient.create({ data: review });
+  await reviewClient.create({ data: stripEmptyCategoryId(review) });
   return { ok: true, message: "Recensione salvata." } satisfies ActionData;
 };
+
+async function loadReviews(shop: string) {
+  try {
+    return await reviewClient.findMany({
+      where: { shop },
+      include: { category: true },
+      orderBy: [{ published: "desc" }, { createdAt: "desc" }],
+      take: 100,
+    });
+  } catch {
+    return reviewClient.findMany({
+      where: { shop },
+      select: {
+        id: true,
+        productId: true,
+        productHandle: true,
+        productTitle: true,
+        rating: true,
+        title: true,
+        body: true,
+        authorName: true,
+        authorType: true,
+        tag: true,
+        photoUrl: true,
+        verified: true,
+        published: true,
+        reviewDate: true,
+      },
+      orderBy: [{ published: "desc" }, { createdAt: "desc" }],
+      take: 100,
+    });
+  }
+}
+
+async function loadCategories(shop: string) {
+  try {
+    return await categoryClient.findMany({
+      where: { shop },
+      orderBy: [{ name: "asc" }],
+    });
+  } catch {
+    return [];
+  }
+}
 
 async function getShopContext(request: Request) {
   try {
@@ -552,6 +595,12 @@ function normalizeReview(input: ProductReviewInput): ProductReviewInput {
     published: Boolean(input.published),
     reviewDate: parseDate(input.reviewDate),
   };
+}
+
+function stripEmptyCategoryId(review: ProductReviewInput) {
+  if (review.categoryId) return review;
+  const { categoryId: _categoryId, ...reviewWithoutCategory } = review;
+  return reviewWithoutCategory;
 }
 
 function validateReview(review: ProductReviewInput) {
