@@ -192,7 +192,7 @@ async function handleAction(request: Request) {
       } satisfies ActionData;
     }
 
-    await reviewClient.createMany({ data: reviews.map(stripEmptyCategoryId) });
+    await createReviews(reviews);
     return { ok: true, message: `${reviews.length} recensioni importate.` } satisfies ActionData;
   }
 
@@ -220,8 +220,28 @@ async function handleAction(request: Request) {
   const errors = validateReview(review);
   if (errors.length) return { ok: false, errors } satisfies ActionData;
 
-  await reviewClient.create({ data: stripEmptyCategoryId(review) });
+  await createReview(review);
   return { ok: true, message: "Recensione salvata." } satisfies ActionData;
+}
+
+async function createReviews(reviews: ProductReviewInput[]) {
+  const data = reviews.map(stripEmptyCategoryId);
+
+  try {
+    await reviewClient.createMany({ data });
+  } catch (error) {
+    console.error("WOWstampa reviews full import failed, retrying legacy payload", error);
+    await reviewClient.createMany({ data: reviews.map(toLegacyReviewInput) });
+  }
+}
+
+async function createReview(review: ProductReviewInput) {
+  try {
+    await reviewClient.create({ data: stripEmptyCategoryId(review) });
+  } catch (error) {
+    console.error("WOWstampa reviews full create failed, retrying legacy payload", error);
+    await reviewClient.create({ data: toLegacyReviewInput(review) });
+  }
 }
 
 async function loadReviews(shop: string) {
@@ -639,6 +659,24 @@ function stripEmptyCategoryId(review: ProductReviewInput) {
   if (review.categoryId) return review;
   const { categoryId: _categoryId, ...reviewWithoutCategory } = review;
   return reviewWithoutCategory;
+}
+
+function toLegacyReviewInput(review: ProductReviewInput) {
+  return {
+    shop: review.shop,
+    productId: review.productId,
+    productHandle: review.productHandle,
+    productTitle: review.productTitle,
+    rating: review.rating,
+    title: review.title,
+    body: review.body,
+    authorName: review.authorName,
+    authorType: review.authorType,
+    tag: review.tag,
+    photoUrl: review.photoUrl,
+    verified: review.verified,
+    published: review.published,
+  };
 }
 
 function validateReview(review: ProductReviewInput) {
