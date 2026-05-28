@@ -5,7 +5,7 @@ services:
     plan: free
     buildCommand: npm install && npm run render-build
     startCommand: npm run render-start
-    healthCheckPath: /
+    healthCheckPath: /healthz
     envVars:
       - key: NODE_VERSION
         value: 22.16.0
