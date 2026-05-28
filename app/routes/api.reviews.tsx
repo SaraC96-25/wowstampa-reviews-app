@@ -5,6 +5,15 @@ const reviewClient = (prisma as any).productReview;
 const categoryClient = (prisma as any).reviewCategory;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  try {
+    return await loadReviewsResponse(request);
+  } catch (error) {
+    console.error("WOWstampa reviews API failed", error);
+    return json(emptyReviewsPayload("Reviews temporarily unavailable."));
+  }
+};
+
+async function loadReviewsResponse(request: Request) {
   const url = new URL(request.url);
   const shop = url.searchParams.get("shop")?.trim();
   const productId = url.searchParams.get("productId")?.trim();
@@ -71,7 +80,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       reviewDate: review.reviewDate?.toISOString() ?? review.createdAt.toISOString(),
     })),
   });
-};
+}
 
 async function findMatchingCategoryIds(shop: string, productId?: string | null, productHandle?: string | null) {
   if (!productId && !productHandle) return [];
@@ -109,6 +118,16 @@ function splitList(value: unknown) {
 
 function normalizeKey(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
+}
+
+function emptyReviewsPayload(error?: string) {
+  return {
+    average: 0,
+    total: 0,
+    distribution: [5, 4, 3, 2, 1].map((rating) => ({ rating, count: 0, percent: 0 })),
+    reviews: [],
+    ...(error ? { error } : {}),
+  };
 }
 
 function json(body: unknown, status = 200) {
