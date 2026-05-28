@@ -37,6 +37,7 @@ type LoaderData = {
   categories: ReviewCategorySummary[];
   appUrl: string;
   shop: string;
+  loadError?: string;
 };
 type ActionData = { ok: boolean; message?: string; errors?: string[] };
 type ProductReviewInput = {
@@ -77,17 +78,31 @@ const PRODUCTS_QUERY = `#graphql
 `;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { shop, products } = await getShopContext(request);
-  const reviews = await loadReviews(shop);
-  const categories = await loadCategories(shop);
+  const appUrl = process.env.SHOPIFY_APP_URL ?? "";
 
-  return {
-    products,
-    reviews: reviews.map(mapReview),
-    categories: categories.map(mapCategory),
-    appUrl: process.env.SHOPIFY_APP_URL ?? "",
-    shop,
-  } satisfies LoaderData;
+  try {
+    const { shop, products } = await getShopContext(request);
+    const reviews = await loadReviews(shop);
+    const categories = await loadCategories(shop);
+
+    return {
+      products,
+      reviews: reviews.map(mapReview),
+      categories: categories.map(mapCategory),
+      appUrl,
+      shop,
+    } satisfies LoaderData;
+  } catch (error) {
+    console.error("WOWstampa reviews admin loader failed", error);
+    return {
+      products: [],
+      reviews: [],
+      categories: [],
+      appUrl,
+      shop: fallbackShop,
+      loadError: "Dati recensioni momentaneamente non disponibili. Controlla le variabili Render e la migrazione Supabase.",
+    } satisfies LoaderData;
+  }
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -205,28 +220,34 @@ async function loadReviews(shop: string) {
       orderBy: [{ published: "desc" }, { createdAt: "desc" }],
       take: 100,
     });
-  } catch {
-    return reviewClient.findMany({
-      where: { shop },
-      select: {
-        id: true,
-        productId: true,
-        productHandle: true,
-        productTitle: true,
-        rating: true,
-        title: true,
-        body: true,
-        authorName: true,
-        authorType: true,
-        tag: true,
-        photoUrl: true,
-        verified: true,
-        published: true,
-        reviewDate: true,
-      },
-      orderBy: [{ published: "desc" }, { createdAt: "desc" }],
-      take: 100,
-    });
+  } catch (error) {
+    console.error("WOWstampa reviews category query failed", error);
+    try {
+      return await reviewClient.findMany({
+        where: { shop },
+        select: {
+          id: true,
+          productId: true,
+          productHandle: true,
+          productTitle: true,
+          rating: true,
+          title: true,
+          body: true,
+          authorName: true,
+          authorType: true,
+          tag: true,
+          photoUrl: true,
+          verified: true,
+          published: true,
+          reviewDate: true,
+        },
+        orderBy: [{ published: "desc" }, { createdAt: "desc" }],
+        take: 100,
+      });
+    } catch (fallbackError) {
+      console.error("WOWstampa reviews fallback query failed", fallbackError);
+      return [];
+    }
   }
 }
 
@@ -271,7 +292,7 @@ async function loadProducts(admin: { graphql: (query: string) => Promise<Respons
 }
 
 export default function ReviewsAdmin() {
-  const { products, reviews, categories, appUrl, shop } = useLoaderData() as LoaderData;
+  const { products, reviews, categories, appUrl, shop, loadError } = useLoaderData() as LoaderData;
   const fetcher = useFetcher();
   const actionData = fetcher.data as ActionData | undefined;
   const publishedReviews = reviews.filter((review) => review.published);
@@ -302,6 +323,11 @@ export default function ReviewsAdmin() {
             </div>
           </div>
 
+          {loadError ? (
+            <div className="reviews-errors">
+              <p>{loadError}</p>
+            </div>
+          ) : null}
           {actionData?.errors?.length ? (
             <div className="reviews-errors">
               {actionData.errors.map((error) => <p key={error}>{error}</p>)}
