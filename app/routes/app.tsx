@@ -6,6 +6,21 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const url = new URL(request.url);
+  const hasShopifyContext =
+    url.searchParams.has("shop") ||
+    url.searchParams.has("host") ||
+    url.searchParams.has("id_token");
+
+  if (!hasShopifyContext) {
+    const shop = process.env.SHOPIFY_SHOP_DOMAIN || "wowstampa.myshopify.com";
+
+    throw new Response(null, {
+      status: 302,
+      headers: { Location: `/auth/login?shop=${shop}` },
+    });
+  }
+
   await authenticate.admin(request);
 
   // eslint-disable-next-line no-undef
