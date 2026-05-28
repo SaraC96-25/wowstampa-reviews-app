@@ -3,26 +3,7 @@ import { Outlet, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
-import { authenticate } from "../shopify.server";
-
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const url = new URL(request.url);
-  const hasShopifyContext =
-    url.searchParams.has("shop") ||
-    url.searchParams.has("host") ||
-    url.searchParams.has("id_token");
-
-  if (!hasShopifyContext) {
-    const shop = process.env.SHOPIFY_SHOP_DOMAIN || "wowstampa.myshopify.com";
-
-    throw new Response(null, {
-      status: 302,
-      headers: { Location: `/auth/login?shop=${shop}` },
-    });
-  }
-
-  await authenticate.admin(request);
-
   // eslint-disable-next-line no-undef
   return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
@@ -31,7 +12,7 @@ export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
 
   return (
-    <AppProvider embedded apiKey={apiKey}>
+    <AppProvider embedded={false} apiKey={apiKey}>
       <s-app-nav>
         <s-link href="/app">Home</s-link>
       </s-app-nav>
