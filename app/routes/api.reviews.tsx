@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import prisma from "../db.server";
 
 const reviewClient = (prisma as any).productReview;
+const categoryClient = (prisma as any).reviewCategory;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
@@ -19,8 +20,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
   if (productHandle) productFilters.push({ productHandle });
 
+  const categoryIds = await findMatchingCategoryIds(shop, productId, productHandle);
+  const filters = [...productFilters, ...categoryIds.map((categoryId: string) => ({ categoryId }))];
+
   const reviews = await reviewClient.findMany({
-    where: { shop, published: true, ...(productFilters.length ? { OR: productFilters } : {}) },
+    where: { shop, published: true, ...(filters.length ? { OR: filters } : {}) },
     orderBy: [{ reviewDate: "desc" }, { createdAt: "desc" }],
     take: limit,
   });
@@ -52,6 +56,44 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })),
   });
 };
+
+async function findMatchingCategoryIds(shop: string, productId?: string | null, productHandle?: string | null) {
+  if (!productId && !productHandle) return [];
+
+  const normalizedIds = new Set<string>();
+  if (productId) {
+    normalizedIds.add(productId);
+    if (/^\d+$/.test(productId)) normalizedIds.add(`gid://shopify/Product/${productId}`);
+    const numericId = productId.match(/Product\/(\d+)$/)?.[1];
+    if (numericId) normalizedIds.add(numericId);
+  }
+
+  const normalizedHandle = normalizeKey(productHandle);
+  const categories = await categoryClient.findMany({ where: { shop } });
+
+  return categories
+    .filter((category: any) => {
+      const ids = splitList(category.productIds);
+      const handles = splitList(category.productHandles).map(normalizeKey);
+
+      return (
+        ids.some((id) => normalizedIds.has(id)) ||
+        (normalizedHandle && handles.includes(normalizedHandle))
+      );
+    })
+    .map((category: any) => category.id);
+}
+
+function splitList(value: unknown) {
+  return String(value ?? "")
+    .split(/[\n,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeKey(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {

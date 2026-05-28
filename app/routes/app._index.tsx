@@ -8,6 +8,8 @@ import { authenticate, unauthenticated } from "../shopify.server";
 type ProductOption = { id: string; title: string; handle: string };
 type ReviewSummary = {
   id: string;
+  categoryId: string | null;
+  categoryName: string | null;
   productId: string | null;
   productHandle: string | null;
   productTitle: string | null;
@@ -22,15 +24,24 @@ type ReviewSummary = {
   published: boolean;
   reviewDate: string | null;
 };
+type ReviewCategorySummary = {
+  id: string;
+  key: string;
+  name: string;
+  productIds: string;
+  productHandles: string;
+};
 type LoaderData = {
   products: ProductOption[];
   reviews: ReviewSummary[];
+  categories: ReviewCategorySummary[];
   appUrl: string;
   shop: string;
 };
 type ActionData = { ok: boolean; message?: string; errors?: string[] };
 type ProductReviewInput = {
   shop: string;
+  categoryId?: string | null;
   productId?: string | null;
   productHandle?: string | null;
   productTitle?: string | null;
@@ -48,6 +59,7 @@ type ProductReviewInput = {
 };
 
 const reviewClient = (prisma as any).productReview;
+const categoryClient = (prisma as any).reviewCategory;
 const fallbackShop = process.env.SHOPIFY_SHOP_DOMAIN || "wowstampa.myshopify.com";
 
 const PRODUCTS_QUERY = `#graphql
@@ -68,13 +80,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { shop, products } = await getShopContext(request);
   const reviews = await reviewClient.findMany({
     where: { shop },
+    include: { category: true },
     orderBy: [{ published: "desc" }, { createdAt: "desc" }],
     take: 100,
+  });
+  const categories = await categoryClient.findMany({
+    where: { shop },
+    orderBy: [{ name: "asc" }],
   });
 
   return {
     products,
     reviews: reviews.map(mapReview),
+    categories: categories.map(mapCategory),
     appUrl: process.env.SHOPIFY_APP_URL ?? "",
     shop,
   } satisfies LoaderData;
@@ -89,6 +107,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const id = String(formData.get("id") ?? "");
     await reviewClient.deleteMany({ where: { id, shop } });
     return { ok: true, message: "Recensione eliminata." } satisfies ActionData;
+  }
+
+  if (intent === "create-category") {
+    const name = String(formData.get("categoryName") ?? "").trim();
+    const key = slugify(String(formData.get("categoryKey") ?? "") || name);
+    const productHandles = normalizeListText(formData.get("categoryProductHandles"));
+    const productIds = normalizeListText(formData.get("categoryProductIds"));
+
+    if (!name || !key) {
+      return { ok: false, errors: ["Inserisci nome e chiave categoria."] } satisfies ActionData;
+    }
+
+    await categoryClient.upsert({
+      where: { shop_key: { shop, key } },
+      create: { shop, key, name, productHandles, productIds },
+      update: { name, productHandles, productIds },
+    });
+
+    return { ok: true, message: "Categoria recensioni salvata." } satisfies ActionData;
+  }
+
+  if (intent === "delete-category") {
+    const id = String(formData.get("id") ?? "");
+    await categoryClient.deleteMany({ where: { id, shop } });
+    return { ok: true, message: "Categoria eliminata." } satisfies ActionData;
   }
 
   if (intent === "toggle") {
@@ -108,8 +151,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       csvFile && typeof (csvFile as any).text === "function"
         ? await (csvFile as any).text()
         : pastedCsv;
+    const categories = await categoryClient.findMany({ where: { shop } });
+    const categoriesByKey = new Map<string, string>(
+      categories.map((category: any) => [String(category.key), String(category.id)]),
+    );
     const reviews = parseCsv(csvText)
-      .map((row) => rowToReview(row, shop))
+      .map((row) => rowToReview(row, shop, categoriesByKey))
       .filter((review): review is ProductReviewInput => Boolean(review));
 
     if (!reviews.length) {
@@ -128,6 +175,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const manualProductTitle = String(formData.get("manualProductTitle") ?? "");
   const review = normalizeReview({
     shop,
+    categoryId: String(formData.get("categoryId") ?? ""),
     productId: product.id,
     productHandle: product.handle || manualProductHandle,
     productTitle: product.title || manualProductTitle,
@@ -180,7 +228,7 @@ async function loadProducts(admin: { graphql: (query: string) => Promise<Respons
 }
 
 export default function ReviewsAdmin() {
-  const { products, reviews, appUrl, shop } = useLoaderData() as LoaderData;
+  const { products, reviews, categories, appUrl, shop } = useLoaderData() as LoaderData;
   const fetcher = useFetcher();
   const actionData = fetcher.data as ActionData | undefined;
   const publishedReviews = reviews.filter((review) => review.published);
@@ -256,6 +304,18 @@ export default function ReviewsAdmin() {
                 </div>
               ) : null}
 
+              <label className="reviews-field">
+                <span>Categoria recensioni</span>
+                <select name="categoryId">
+                  <option value="">Nessuna categoria</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <div className="reviews-field-grid">
                 <label className="reviews-field">
                   <span>Valutazione</span>
@@ -318,7 +378,8 @@ export default function ReviewsAdmin() {
               </div>
               <p className="reviews-muted">
                 Colonne: product_id, product_handle, product_title, rating, title,
-                body, author_name, author_type, tag, photo_url, verified, published, review_date.
+                body, author_name, author_type, tag, photo_url, verified, published,
+                review_date, category_key.
               </p>
               <label className="reviews-field">
                 <span>File CSV</span>
@@ -337,6 +398,65 @@ export default function ReviewsAdmin() {
 
           <section className="reviews-panel reviews-panel--wide">
             <div className="reviews-panel__head">
+              <h2>Categorie recensioni</h2>
+              <span className="reviews-muted">{categories.length} categorie</span>
+            </div>
+            <div className="reviews-category-layout">
+              <fetcher.Form method="post" className="reviews-category-form">
+                <input name="intent" type="hidden" value="create-category" />
+                <div className="reviews-field-grid">
+                  <label className="reviews-field">
+                    <span>Nome categoria</span>
+                    <input name="categoryName" placeholder="Banner PVC" required />
+                  </label>
+                  <label className="reviews-field">
+                    <span>Chiave categoria</span>
+                    <input name="categoryKey" placeholder="banner-pvc" />
+                  </label>
+                </div>
+                <label className="reviews-field">
+                  <span>Handle prodotti inclusi</span>
+                  <textarea
+                    name="categoryProductHandles"
+                    rows={4}
+                    placeholder={"banner-300x100\nbanner-500x200\nstriscioni-pubblicitari"}
+                  />
+                </label>
+                <label className="reviews-field">
+                  <span>ID prodotti inclusi opzionali</span>
+                  <textarea
+                    name="categoryProductIds"
+                    rows={3}
+                    placeholder={"gid://shopify/Product/123456789\n123456789"}
+                  />
+                </label>
+                <button className="reviews-button reviews-button--primary" type="submit">
+                  Salva categoria
+                </button>
+              </fetcher.Form>
+
+              <div className="reviews-category-list">
+                {categories.map((category) => (
+                  <article className="reviews-category-row" key={category.id}>
+                    <div>
+                      <h3>{category.name}</h3>
+                      <small>{category.key}</small>
+                      <p>{category.productHandles || "Nessun handle prodotto"}</p>
+                    </div>
+                    <fetcher.Form method="post">
+                      <input name="intent" type="hidden" value="delete-category" />
+                      <input name="id" type="hidden" value={category.id} />
+                      <button className="reviews-button reviews-button--danger" type="submit">Elimina</button>
+                    </fetcher.Form>
+                  </article>
+                ))}
+                {!categories.length ? <p className="reviews-muted reviews-empty-list">Ancora nessuna categoria.</p> : null}
+              </div>
+            </div>
+          </section>
+
+          <section className="reviews-panel reviews-panel--wide">
+            <div className="reviews-panel__head">
               <h2>Recensioni salvate</h2>
               <span className="reviews-muted">{reviews.length} totali</span>
             </div>
@@ -347,7 +467,7 @@ export default function ReviewsAdmin() {
                     <div className="reviews-stars">{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</div>
                     <h3>{review.title}</h3>
                     <p>{review.body}</p>
-                    <small>{review.authorName}{review.authorType ? ` · ${review.authorType}` : ""}{review.productTitle ? ` · ${review.productTitle}` : ""}</small>
+                    <small>{review.authorName}{review.authorType ? ` · ${review.authorType}` : ""}{review.productTitle ? ` · ${review.productTitle}` : ""}{review.categoryName ? ` · ${review.categoryName}` : ""}</small>
                   </div>
                   {review.photoUrl ? <img src={review.photoUrl} alt="" /> : <span className="reviews-photo-empty">No foto</span>}
                   <div className="reviews-row-actions">
@@ -377,6 +497,8 @@ export default function ReviewsAdmin() {
 function mapReview(review: any): ReviewSummary {
   return {
     id: review.id,
+    categoryId: review.categoryId,
+    categoryName: review.category?.name ?? null,
     productId: review.productId,
     productHandle: review.productHandle,
     productTitle: review.productTitle,
@@ -393,6 +515,16 @@ function mapReview(review: any): ReviewSummary {
   };
 }
 
+function mapCategory(category: any): ReviewCategorySummary {
+  return {
+    id: category.id,
+    key: category.key,
+    name: category.name,
+    productIds: category.productIds,
+    productHandles: category.productHandles,
+  };
+}
+
 function parseSelectedProduct(value: string): ProductOption {
   try {
     const product = JSON.parse(value);
@@ -405,6 +537,7 @@ function parseSelectedProduct(value: string): ProductOption {
 function normalizeReview(input: ProductReviewInput): ProductReviewInput {
   return {
     ...input,
+    categoryId: clean(input.categoryId),
     productId: clean(input.productId),
     productHandle: clean(input.productHandle),
     productTitle: clean(input.productTitle),
@@ -423,11 +556,31 @@ function normalizeReview(input: ProductReviewInput): ProductReviewInput {
 
 function validateReview(review: ProductReviewInput) {
   const errors: string[] = [];
-  if (!review.productId && !review.productHandle) errors.push("Seleziona un prodotto o indica un handle nel CSV.");
+  if (!review.categoryId && !review.productId && !review.productHandle) {
+    errors.push("Seleziona un prodotto, una categoria o indica un handle nel CSV.");
+  }
   if (!review.title) errors.push("Inserisci il titolo della recensione.");
   if (!review.body) errors.push("Inserisci il testo della recensione.");
   if (!review.authorName) errors.push("Inserisci il nome cliente.");
   return errors;
+}
+
+function normalizeListText(value: FormDataEntryValue | null) {
+  return String(value ?? "")
+    .split(/[\n,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function slugify(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function clean(value: unknown) {
@@ -449,9 +602,11 @@ function parseBoolean(value: unknown, fallback = true) {
   return ["1", "true", "yes", "si", "sì", "published", "pubblicata"].includes(text);
 }
 
-function rowToReview(row: Record<string, string>, shop: string) {
+function rowToReview(row: Record<string, string>, shop: string, categoriesByKey = new Map<string, string>()) {
+  const categoryKey = slugify(row.category_key || row.categoryKey || row.categoria || "");
   const review = normalizeReview({
     shop,
+    categoryId: categoryKey ? categoriesByKey.get(categoryKey) : null,
     productId: row.product_id || row.productId,
     productHandle: row.product_handle || row.productHandle || row.handle,
     productTitle: row.product_title || row.productTitle || row.product,
@@ -549,6 +704,12 @@ const styles = `
   .reviews-success p { margin: 0; }
   .reviews-panel--wide { padding: 0; }
   .reviews-panel--wide .reviews-panel__head { border-bottom: 1px solid #dfe3e8; margin: 0; padding: 18px; }
+  .reviews-category-layout { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1fr); gap: 18px; padding: 18px; }
+  .reviews-category-form { border: 1px solid #dfe3e8; border-radius: 8px; padding: 14px; }
+  .reviews-category-list { display: grid; gap: 10px; align-content: start; }
+  .reviews-category-row { align-items: center; border: 1px solid #dfe3e8; border-radius: 8px; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; padding: 14px; }
+  .reviews-category-row h3 { margin: 0; }
+  .reviews-category-row p { margin: 6px 0 0; white-space: pre-line; }
   .reviews-list { display: grid; }
   .reviews-row { align-items: center; border-bottom: 1px solid #dfe3e8; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 110px auto; padding: 16px 18px; }
   .reviews-row.is-muted { opacity: .55; }
@@ -557,7 +718,7 @@ const styles = `
   .reviews-photo-empty { align-items: center; background: #f6f6f7; color: #6d7175; display: flex; justify-content: center; font-size: 12px; font-weight: 700; }
   .reviews-row-actions { display: flex; gap: 8px; }
   .reviews-empty-list { padding: 18px; }
-  @media (max-width: 900px) { .reviews-hero, .reviews-grid, .reviews-row { grid-template-columns: 1fr; display: grid; } .reviews-field-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .reviews-hero, .reviews-grid, .reviews-category-layout, .reviews-category-row, .reviews-row { grid-template-columns: 1fr; display: grid; } .reviews-field-grid { grid-template-columns: 1fr; } }
 `;
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);

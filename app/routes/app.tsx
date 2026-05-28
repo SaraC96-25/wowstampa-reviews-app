@@ -9,13 +9,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function App() {
-  const { apiKey } = useLoaderData<typeof loader>();
+  useLoaderData<typeof loader>();
 
   return (
-    <AppProvider embedded={false} apiKey={apiKey}>
-      <s-app-nav>
-        <s-link href="/app">Home</s-link>
-      </s-app-nav>
+    <AppProvider embedded={false}>
       <Outlet />
     </AppProvider>
   );

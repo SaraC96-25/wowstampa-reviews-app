@@ -33,6 +33,7 @@ model Session {
 model ProductReview {
   id            String   @id @default(cuid())
   shop          String
+  categoryId    String?
   productId     String?
   productHandle String?
   productTitle  String?
@@ -49,8 +50,25 @@ model ProductReview {
   reviewDate    DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  category      ReviewCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
+  @@index([shop, categoryId])
   @@index([shop, productId])
   @@index([shop, productHandle])
   @@index([shop, published])
+}
+
+model ReviewCategory {
+  id             String          @id @default(cuid())
+  shop           String
+  key            String
+  name           String
+  productIds     String          @default("")
+  productHandles String          @default("")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  reviews        ProductReview[]
+
+  @@unique([shop, key])
+  @@index([shop])
 }
