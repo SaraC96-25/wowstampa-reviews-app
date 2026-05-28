@@ -352,7 +352,7 @@ export default function ReviewsAdmin() {
           ) : null}
 
           <div className="reviews-grid">
-            <fetcher.Form method="post" className="reviews-panel">
+            <fetcher.Form action="?index" method="post" className="reviews-panel">
               <input name="intent" type="hidden" value="create" />
               <div className="reviews-panel__head">
                 <h2>Aggiungi recensione</h2>
@@ -451,7 +451,7 @@ export default function ReviewsAdmin() {
               </div>
             </fetcher.Form>
 
-            <fetcher.Form method="post" encType="multipart/form-data" className="reviews-panel">
+            <fetcher.Form action="?index" method="post" encType="multipart/form-data" className="reviews-panel">
               <input name="intent" type="hidden" value="import" />
               <div className="reviews-panel__head">
                 <h2>Import CSV</h2>
@@ -483,7 +483,7 @@ export default function ReviewsAdmin() {
               <span className="reviews-muted">{categories.length} categorie</span>
             </div>
             <div className="reviews-category-layout">
-              <fetcher.Form method="post" className="reviews-category-form">
+              <fetcher.Form action="?index" method="post" className="reviews-category-form">
                 <input name="intent" type="hidden" value="create-category" />
                 <div className="reviews-field-grid">
                   <label className="reviews-field">
@@ -524,7 +524,7 @@ export default function ReviewsAdmin() {
                       <small>{category.key}</small>
                       <p>{category.productHandles || "Nessun handle prodotto"}</p>
                     </div>
-                    <fetcher.Form method="post">
+                    <fetcher.Form action="?index" method="post">
                       <input name="intent" type="hidden" value="delete-category" />
                       <input name="id" type="hidden" value={category.id} />
                       <button className="reviews-button reviews-button--danger" type="submit">Elimina</button>
@@ -552,13 +552,13 @@ export default function ReviewsAdmin() {
                   </div>
                   {review.photoUrl ? <img src={review.photoUrl} alt="" /> : <span className="reviews-photo-empty">No foto</span>}
                   <div className="reviews-row-actions">
-                    <fetcher.Form method="post">
+                    <fetcher.Form action="?index" method="post">
                       <input name="intent" type="hidden" value="toggle" />
                       <input name="id" type="hidden" value={review.id} />
                       <input name="published" type="hidden" value={String(!review.published)} />
                       <button className="reviews-button" type="submit">{review.published ? "Nascondi" : "Pubblica"}</button>
                     </fetcher.Form>
-                    <fetcher.Form method="post">
+                    <fetcher.Form action="?index" method="post">
                       <input name="intent" type="hidden" value="delete" />
                       <input name="id" type="hidden" value={review.id} />
                       <button className="reviews-button reviews-button--danger" type="submit">Elimina</button>
