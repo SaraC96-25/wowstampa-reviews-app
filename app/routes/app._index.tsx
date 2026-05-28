@@ -252,38 +252,42 @@ async function createReview(review: ProductReviewInput) {
   }
 }
 
-async function loadReviews(shop: string) {
+async function loadReviews(shop: string): Promise<any[]> {
   try {
-    return await reviewClient.findMany({
-      where: { shop },
-      include: { category: true },
-      orderBy: [{ published: "desc" }, { createdAt: "desc" }],
-      take: 100,
-    });
+    return await runDatabaseWrite("reviews category query", () =>
+      reviewClient.findMany({
+        where: { shop },
+        include: { category: true },
+        orderBy: [{ published: "desc" }, { createdAt: "desc" }],
+        take: 100,
+      }),
+    );
   } catch (error) {
     console.error("WOWstampa reviews category query failed", error);
     try {
-      return await reviewClient.findMany({
-        where: { shop },
-        select: {
-          id: true,
-          productId: true,
-          productHandle: true,
-          productTitle: true,
-          rating: true,
-          title: true,
-          body: true,
-          authorName: true,
-          authorType: true,
-          tag: true,
-          photoUrl: true,
-          verified: true,
-          published: true,
-          reviewDate: true,
-        },
-        orderBy: [{ published: "desc" }, { createdAt: "desc" }],
-        take: 100,
-      });
+      return await runDatabaseWrite("reviews fallback query", () =>
+        reviewClient.findMany({
+          where: { shop },
+          select: {
+            id: true,
+            productId: true,
+            productHandle: true,
+            productTitle: true,
+            rating: true,
+            title: true,
+            body: true,
+            authorName: true,
+            authorType: true,
+            tag: true,
+            photoUrl: true,
+            verified: true,
+            published: true,
+            reviewDate: true,
+          },
+          orderBy: [{ published: "desc" }, { createdAt: "desc" }],
+          take: 100,
+        }),
+      );
     } catch (fallbackError) {
       console.error("WOWstampa reviews fallback query failed", fallbackError);
       return [];
@@ -291,12 +295,14 @@ async function loadReviews(shop: string) {
   }
 }
 
-async function loadCategories(shop: string) {
+async function loadCategories(shop: string): Promise<any[]> {
   try {
-    return await categoryClient.findMany({
-      where: { shop },
-      orderBy: [{ name: "asc" }],
-    });
+    return await runDatabaseWrite("categories query", () =>
+      categoryClient.findMany({
+        where: { shop },
+        orderBy: [{ name: "asc" }],
+      }),
+    );
   } catch {
     return [];
   }
