@@ -106,6 +106,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+  try {
+    return await handleAction(request);
+  } catch (error) {
+    console.error("WOWstampa reviews admin action failed", error);
+    return {
+      ok: false,
+      errors: ["Operazione non riuscita: controlla che Supabase sia aggiornato e riprova."],
+    } satisfies ActionData;
+  }
+};
+
+async function handleAction(request: Request) {
   const { shop } = await getShopContext(request);
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "create");
@@ -210,7 +222,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   await reviewClient.create({ data: stripEmptyCategoryId(review) });
   return { ok: true, message: "Recensione salvata." } satisfies ActionData;
-};
+}
 
 async function loadReviews(shop: string) {
   try {
