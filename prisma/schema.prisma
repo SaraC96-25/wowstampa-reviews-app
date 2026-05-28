@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+
+  @@map("WowReviewSession")
+}
+
+model ProductReview {
+  id            String   @id @default(cuid())
+  shop          String
+  productId     String?
+  productHandle String?
+  productTitle  String?
+  rating        Int      @default(5)
+  title         String
+  body          String
+  authorName    String
+  authorType    String?
+  tag           String?
+  photoUrl      String?
+  verified      Boolean  @default(true)
+  published     Boolean  @default(true)
+  source        String   @default("manual")
+  reviewDate    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([shop, productId])
+  @@index([shop, productHandle])
+  @@index([shop, published])
+}
