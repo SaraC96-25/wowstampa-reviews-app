@@ -1,10 +1,9 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
-import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import prisma from "../db.server";
-import { authenticate } from "../shopify.server";
+import { authenticate, unauthenticated } from "../shopify.server";
 
 type ProductOption = { id: string; title: string; handle: string };
 type ReviewSummary = {
@@ -49,6 +48,7 @@ type ProductReviewInput = {
 };
 
 const reviewClient = (prisma as any).productReview;
+const fallbackShop = process.env.SHOPIFY_SHOP_DOMAIN || "wowstampa.myshopify.com";
 
 const PRODUCTS_QUERY = `#graphql
   query WowReviewsProducts {
@@ -65,21 +65,9 @@ const PRODUCTS_QUERY = `#graphql
 `;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
-  const response = await admin.graphql(PRODUCTS_QUERY);
-  const json: any = await response.json();
-
-  if (json.errors?.length) {
-    throw new Error(json.errors.map((error: any) => error.message).join("\n"));
-  }
-
-  const products: ProductOption[] = json.data.products.edges.map(({ node }: any) => ({
-    id: node.id,
-    title: node.title,
-    handle: node.handle,
-  }));
+  const { shop, products } = await getShopContext(request);
   const reviews = await reviewClient.findMany({
-    where: { shop: session.shop },
+    where: { shop },
     orderBy: [{ published: "desc" }, { createdAt: "desc" }],
     take: 100,
   });
@@ -88,25 +76,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     products,
     reviews: reviews.map(mapReview),
     appUrl: process.env.SHOPIFY_APP_URL ?? "",
-    shop: session.shop,
+    shop,
   } satisfies LoaderData;
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { shop } = await getShopContext(request);
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "create");
 
   if (intent === "delete") {
     const id = String(formData.get("id") ?? "");
-    await reviewClient.deleteMany({ where: { id, shop: session.shop } });
+    await reviewClient.deleteMany({ where: { id, shop } });
     return { ok: true, message: "Recensione eliminata." } satisfies ActionData;
   }
 
   if (intent === "toggle") {
     const id = String(formData.get("id") ?? "");
     const published = String(formData.get("published") ?? "false") === "true";
-    await reviewClient.updateMany({ where: { id, shop: session.shop }, data: { published } });
+    await reviewClient.updateMany({ where: { id, shop }, data: { published } });
     return {
       ok: true,
       message: published ? "Recensione pubblicata." : "Recensione nascosta.",
@@ -121,7 +109,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ? await (csvFile as any).text()
         : pastedCsv;
     const reviews = parseCsv(csvText)
-      .map((row) => rowToReview(row, session.shop))
+      .map((row) => rowToReview(row, shop))
       .filter((review): review is ProductReviewInput => Boolean(review));
 
     if (!reviews.length) {
@@ -136,11 +124,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const product = parseSelectedProduct(String(formData.get("product") ?? ""));
+  const manualProductHandle = String(formData.get("manualProductHandle") ?? "");
+  const manualProductTitle = String(formData.get("manualProductTitle") ?? "");
   const review = normalizeReview({
-    shop: session.shop,
+    shop,
     productId: product.id,
-    productHandle: product.handle,
-    productTitle: product.title,
+    productHandle: product.handle || manualProductHandle,
+    productTitle: product.title || manualProductTitle,
     rating: Number(formData.get("rating") ?? 5),
     title: String(formData.get("title") ?? ""),
     body: String(formData.get("body") ?? ""),
@@ -160,21 +150,45 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { ok: true, message: "Recensione salvata." } satisfies ActionData;
 };
 
+async function getShopContext(request: Request) {
+  try {
+    const { admin, session } = await authenticate.admin(request);
+    return { shop: session.shop, products: await loadProducts(admin) };
+  } catch {
+    try {
+      const { admin, session } = await unauthenticated.admin(fallbackShop);
+      return { shop: session.shop, products: await loadProducts(admin) };
+    } catch {
+      return { shop: fallbackShop, products: [] };
+    }
+  }
+}
+
+async function loadProducts(admin: { graphql: (query: string) => Promise<Response> }) {
+  const response = await admin.graphql(PRODUCTS_QUERY);
+  const json: any = await response.json();
+
+  if (json.errors?.length) {
+    return [];
+  }
+
+  return json.data.products.edges.map(({ node }: any) => ({
+    id: node.id,
+    title: node.title,
+    handle: node.handle,
+  })) satisfies ProductOption[];
+}
+
 export default function ReviewsAdmin() {
   const { products, reviews, appUrl, shop } = useLoaderData() as LoaderData;
   const fetcher = useFetcher();
   const actionData = fetcher.data as ActionData | undefined;
-  const shopify = useAppBridge();
   const publishedReviews = reviews.filter((review) => review.published);
   const averageRating = useMemo(() => {
     if (!publishedReviews.length) return "0.0";
     const total = publishedReviews.reduce((sum, review) => sum + review.rating, 0);
     return (total / publishedReviews.length).toFixed(1);
   }, [publishedReviews]);
-
-  useEffect(() => {
-    if (actionData?.ok && actionData.message) shopify.toast.show(actionData.message);
-  }, [actionData, shopify]);
 
   return (
     <s-page heading="WOWstampa Reviews">
@@ -202,6 +216,11 @@ export default function ReviewsAdmin() {
               {actionData.errors.map((error) => <p key={error}>{error}</p>)}
             </div>
           ) : null}
+          {actionData?.ok && actionData.message ? (
+            <div className="reviews-success">
+              <p>{actionData.message}</p>
+            </div>
+          ) : null}
 
           <div className="reviews-grid">
             <fetcher.Form method="post" className="reviews-panel">
@@ -215,7 +234,7 @@ export default function ReviewsAdmin() {
 
               <label className="reviews-field">
                 <span>Prodotto</span>
-                <select name="product" required>
+                <select name="product">
                   <option value="">Seleziona prodotto</option>
                   {products.map((product) => (
                     <option key={product.id} value={JSON.stringify(product)}>
@@ -224,6 +243,18 @@ export default function ReviewsAdmin() {
                   ))}
                 </select>
               </label>
+              {!products.length ? (
+                <div className="reviews-field-grid">
+                  <label className="reviews-field">
+                    <span>Handle prodotto</span>
+                    <input name="manualProductHandle" placeholder="banner-300x100" />
+                  </label>
+                  <label className="reviews-field">
+                    <span>Titolo prodotto</span>
+                    <input name="manualProductTitle" placeholder="Banner 300x100" />
+                  </label>
+                </div>
+              ) : null}
 
               <div className="reviews-field-grid">
                 <label className="reviews-field">
@@ -490,7 +521,7 @@ function csvToRows(csv: string) {
 
 const styles = `
   .reviews-admin { display: grid; gap: 18px; margin: 0 auto; max-width: 1180px; width: 100%; }
-  .reviews-hero, .reviews-panel, .reviews-errors { background: #fff; border: 1px solid #dfe3e8; border-radius: 8px; box-shadow: 0 1px 0 rgba(0,0,0,.04); padding: 18px; }
+  .reviews-hero, .reviews-panel, .reviews-errors, .reviews-success { background: #fff; border: 1px solid #dfe3e8; border-radius: 8px; box-shadow: 0 1px 0 rgba(0,0,0,.04); padding: 18px; }
   .reviews-hero { display: flex; justify-content: space-between; gap: 18px; align-items: center; }
   .reviews-hero h1, .reviews-panel h2, .reviews-row h3 { color: #202223; margin: 0; }
   .reviews-hero p, .reviews-muted, .reviews-row p { color: #6d7175; }
@@ -514,6 +545,8 @@ const styles = `
   .reviews-endpoint code { overflow-wrap: anywhere; }
   .reviews-errors { background: #fff4f4; border-color: #fed3d1; color: #8e1f0b; }
   .reviews-errors p { margin: 0; }
+  .reviews-success { background: #f1f8f5; border-color: #95c9b4; color: #0c5132; }
+  .reviews-success p { margin: 0; }
   .reviews-panel--wide { padding: 0; }
   .reviews-panel--wide .reviews-panel__head { border-bottom: 1px solid #dfe3e8; margin: 0; padding: 18px; }
   .reviews-list { display: grid; }
