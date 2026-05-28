@@ -20,11 +20,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
   if (productHandle) productFilters.push({ productHandle });
 
-  const categoryIds = await findMatchingCategoryIds(shop, productId, productHandle);
+  const categoryIds = await findMatchingCategoryIds(shop, productId, productHandle).catch(() => []);
   const filters = [...productFilters, ...categoryIds.map((categoryId: string) => ({ categoryId }))];
 
   const reviews = await reviewClient.findMany({
     where: { shop, published: true, ...(filters.length ? { OR: filters } : {}) },
+    select: {
+      id: true,
+      productId: true,
+      productHandle: true,
+      productTitle: true,
+      rating: true,
+      title: true,
+      body: true,
+      authorName: true,
+      authorType: true,
+      tag: true,
+      photoUrl: true,
+      verified: true,
+      reviewDate: true,
+      createdAt: true,
+    },
     orderBy: [{ reviewDate: "desc" }, { createdAt: "desc" }],
     take: limit,
   });
