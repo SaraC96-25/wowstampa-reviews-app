@@ -211,7 +211,7 @@
             '<article class="ws-review-card">' +
               '<div>' +
                 '<div class="ws-review-card__top">' +
-                  '<span class="ws-reviews__stars">' + stars(review.rating) + '</span>' +
+                  trustStarsMarkup(review.rating, 'ws-review-card__stars') +
                   (review.verified ? '<span>✓ Verificata</span>' : '') +
                 '</div>' +
                 '<h3>' + escapeHtml(review.title) + '</h3>' +
@@ -234,9 +234,24 @@
         if (element) element.textContent = text;
       }
 
-      function stars(rating) {
-        var value = Math.max(1, Math.min(5, Number(rating) || 5));
-        return '★★★★★'.slice(0, value) + '☆☆☆☆☆'.slice(0, 5 - value);
+      function trustStarsMarkup(rating, className) {
+        var value = Math.max(0, Math.min(5, Number(rating) || 0));
+        var html = '<span class="' + className + '" aria-label="' + value.toFixed(1) + ' su 5">';
+
+        for (var index = 0; index < 5; index += 1) {
+          var progress = value - index;
+          var src = starUrls.empty;
+
+          if (progress >= 0.75) {
+            src = starUrls.full;
+          } else if (progress >= 0.25) {
+            src = starUrls.half;
+          }
+
+          html += '<img src="' + escapeAttribute(src) + '" alt="" loading="lazy" width="16" height="16">';
+        }
+
+        return html + '</span>';
       }
 
       function setTrustStars(rating) {
@@ -591,6 +606,20 @@
     color: #4e6257;
     font-size: 11px;
     font-weight: 850;
+  }
+
+  .ws-review-card__stars {
+    display: grid;
+    grid-template-columns: repeat(5, 16px);
+    gap: 2px;
+    align-items: center;
+    width: max-content;
+  }
+
+  .ws-review-card__stars img {
+    display: block;
+    width: 16px;
+    height: 16px;
   }
 
   .ws-review-card h3 {
