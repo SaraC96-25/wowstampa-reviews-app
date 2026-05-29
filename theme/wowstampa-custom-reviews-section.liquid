@@ -139,6 +139,7 @@
       var activeFilter = 'all';
 
       if (!endpoint || !cards) return;
+      prepareReviewModal();
 
       var url = new URL(endpoint, window.location.origin);
       url.searchParams.set('shop', shop);
@@ -298,6 +299,8 @@
         setModalText('[data-ws-review-modal-date]', relativeDate(review.reviewDate));
 
         modal.hidden = false;
+        modal.style.display = 'grid';
+        document.documentElement.style.overflow = 'hidden';
         root.classList.add('ws-reviews--modal-open');
         var closeButton = modal.querySelector('[data-ws-review-modal-close]');
         if (closeButton) closeButton.focus();
@@ -306,7 +309,59 @@
       function closeReviewModal() {
         if (!modal || modal.hidden) return;
         modal.hidden = true;
+        modal.style.display = 'none';
+        document.documentElement.style.overflow = '';
         root.classList.remove('ws-reviews--modal-open');
+      }
+
+      function prepareReviewModal() {
+        if (!modal) return;
+        document.body.appendChild(modal);
+        modal.style.position = 'fixed';
+        modal.style.inset = '0';
+        modal.style.zIndex = '999999';
+        modal.style.display = 'none';
+        modal.style.placeItems = 'center';
+        modal.style.padding = '20px';
+
+        var backdrop = modal.querySelector('.ws-review-modal__backdrop');
+        if (backdrop) {
+          backdrop.style.position = 'absolute';
+          backdrop.style.inset = '0';
+          backdrop.style.background = 'rgba(8, 22, 15, .52)';
+          backdrop.style.backdropFilter = 'blur(5px)';
+        }
+
+        var dialog = modal.querySelector('.ws-review-modal__dialog');
+        if (dialog) {
+          dialog.style.position = 'relative';
+          dialog.style.zIndex = '1';
+          dialog.style.boxSizing = 'border-box';
+          dialog.style.width = 'min(620px, 100%)';
+          dialog.style.maxHeight = 'min(760px, calc(100vh - 40px))';
+          dialog.style.overflow = 'auto';
+          dialog.style.padding = '28px';
+          dialog.style.border = '1px solid #dbece2';
+          dialog.style.borderRadius = '18px';
+          dialog.style.background = '#ffffff';
+          dialog.style.boxShadow = '0 26px 70px rgba(5, 28, 15, .24)';
+        }
+
+        var close = modal.querySelector('.ws-review-modal__close');
+        if (close) {
+          close.style.position = 'absolute';
+          close.style.top = '14px';
+          close.style.right = '14px';
+          close.style.width = '34px';
+          close.style.height = '34px';
+          close.style.border = '1px solid #dcebe3';
+          close.style.borderRadius = '999px';
+          close.style.background = '#ffffff';
+          close.style.color = '#21382b';
+          close.style.cursor = 'pointer';
+          close.style.fontSize = '24px';
+          close.style.lineHeight = '1';
+        }
       }
 
       function setModalText(selector, text) {
@@ -326,7 +381,8 @@
 
       function trustStarsMarkup(rating, className) {
         var value = Math.max(0, Math.min(5, Number(rating) || 0));
-        var html = '<span class="' + className + '" aria-label="' + value.toFixed(1) + ' su 5">';
+        var size = className.indexOf('modal') !== -1 ? 20 : 16;
+        var html = '<span class="' + className + '" aria-label="' + value.toFixed(1) + ' su 5" style="display:grid;grid-template-columns:repeat(5,' + size + 'px);gap:2px;align-items:center;width:max-content;">';
 
         for (var index = 0; index < 5; index += 1) {
           var progress = value - index;
@@ -338,7 +394,7 @@
             src = starUrls.half;
           }
 
-          html += '<img src="' + escapeAttribute(src) + '" alt="" loading="lazy" width="16" height="16">';
+          html += '<img src="' + escapeAttribute(src) + '" alt="" loading="lazy" width="' + size + '" height="' + size + '" style="display:block;width:' + size + 'px;height:' + size + 'px;">';
         }
 
         return html + '</span>';
