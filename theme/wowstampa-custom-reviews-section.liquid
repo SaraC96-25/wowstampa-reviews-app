@@ -172,6 +172,15 @@
         if (!gallery) return;
 
         var photos = reviews.filter(function (review) { return review.photoUrl; });
+        root.classList.toggle('ws-reviews--no-photos', photos.length === 0);
+
+        if (!photos.length) {
+          gallery.hidden = true;
+          gallery.innerHTML = '';
+          return;
+        }
+
+        gallery.hidden = false;
         var firstPhotos = photos.slice(0, 3);
         gallery.innerHTML = '';
 
@@ -390,6 +399,14 @@
     gap: 18px;
     align-items: stretch;
     margin-bottom: 20px;
+  }
+
+  .ws-reviews--no-photos .ws-reviews__dashboard {
+    grid-template-columns: minmax(250px, .7fr) minmax(420px, 1.3fr);
+  }
+
+  .ws-reviews--no-photos .ws-reviews__gallery {
+    display: none;
   }
 
   .ws-reviews__rating-card,
