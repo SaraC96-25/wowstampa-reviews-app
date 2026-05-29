@@ -58,7 +58,9 @@
           Basato su <span data-ws-total>0</span> recensioni
         </a>
         <span class="ws-reviews__verified">✓ Recensioni verificate</span>
-        <small>Come vengono raccolte le recensioni?</small>
+        <a class="ws-reviews__collection-link" href="https://help.trustpilot.com/s/article/How-do-we-make-sure-reviews-are-trustworthy?language=it" target="_blank" rel="noopener">
+          Come vengono raccolte le recensioni?
+        </a>
       </aside>
 
       <div class="ws-reviews__bars" aria-label="Distribuzione recensioni">
@@ -521,11 +523,16 @@
     font-size: 56px;
   }
 
-  .ws-reviews__rating-card a,
-  .ws-reviews__rating-card small {
+  .ws-reviews__rating-card a {
     color: #64756b;
     font-size: 12px;
     font-weight: 800;
+  }
+
+  .ws-reviews__collection-link {
+    width: fit-content;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
   .ws-reviews__verified {
