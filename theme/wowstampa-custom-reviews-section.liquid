@@ -119,8 +119,9 @@
       url.searchParams.set('productId', productId);
       url.searchParams.set('productHandle', productHandle);
       url.searchParams.set('limit', '30');
+      url.searchParams.set('_ws_t', Date.now().toString());
 
-      fetch(url.toString())
+      fetch(url.toString(), { cache: 'no-store' })
         .then(function (response) {
           if (!response.ok) throw new Error('Reviews unavailable');
           return response.json();
