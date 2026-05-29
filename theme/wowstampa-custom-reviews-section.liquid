@@ -23,16 +23,21 @@
         <p>Guarda cosa dicono aziende, negozi ed eventi che hanno già stampato con WowStampa.</p>
       </div>
 
-      <a class="ws-reviews__brand" href="{{ section.settings.trustpilot_url }}" target="_blank" rel="noopener">
+      <div class="ws-reviews__brand">
         <span>Eccezionale <b data-ws-average-label>4.9</b> su 5</span>
-        <img
-          src="{{ section.settings.trustpilot_logo_url | escape }}"
-          alt="Trustpilot"
-          loading="lazy"
-          width="168"
-          height="42"
-        >
-      </a>
+        <a href="{{ section.settings.trustpilot_url }}" target="_blank" rel="noopener">
+          <img
+            src="{{ section.settings.trustpilot_logo_url | escape }}"
+            alt="Trustpilot"
+            loading="lazy"
+            width="168"
+            height="42"
+          >
+        </a>
+        <a class="ws-reviews__trust-note" href="https://help.trustpilot.com/s/article/How-do-we-make-sure-reviews-are-trustworthy?language=it" target="_blank" rel="noopener">
+          Le recensioni sono controllate da Trustpilot
+        </a>
+      </div>
     </div>
 
     <div class="ws-reviews__dashboard">
@@ -448,7 +453,6 @@
     justify-items: end;
     gap: 10px;
     color: #11251b;
-    text-decoration: none;
     white-space: nowrap;
     font-size: 14px;
     font-weight: 750;
@@ -459,6 +463,14 @@
     width: 168px;
     max-width: 100%;
     height: auto;
+  }
+
+  .ws-reviews__trust-note {
+    color: #64756b;
+    font-size: 12px;
+    font-weight: 800;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
   .ws-reviews__score span {
