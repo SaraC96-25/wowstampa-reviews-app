@@ -32,27 +32,29 @@ async function loadReviewsResponse(request: Request) {
   const categoryIds = await findMatchingCategoryIds(shop, productId, productHandle).catch(() => []);
   const filters = [...productFilters, ...categoryIds.map((categoryId: string) => ({ categoryId }))];
 
-  const reviews = await reviewClient.findMany({
-    where: { shop, published: true, ...(filters.length ? { OR: filters } : {}) },
-    select: {
-      id: true,
-      productId: true,
-      productHandle: true,
-      productTitle: true,
-      rating: true,
-      title: true,
-      body: true,
-      authorName: true,
-      authorType: true,
-      tag: true,
-      photoUrl: true,
-      verified: true,
-      reviewDate: true,
-      createdAt: true,
-    },
-    orderBy: [{ reviewDate: "desc" }, { createdAt: "desc" }],
-    take: limit,
-  });
+  const reviews = await runDatabaseRead<any[]>("reviews API query", () =>
+    reviewClient.findMany({
+      where: { shop, published: true, ...(filters.length ? { OR: filters } : {}) },
+      select: {
+        id: true,
+        productId: true,
+        productHandle: true,
+        productTitle: true,
+        rating: true,
+        title: true,
+        body: true,
+        authorName: true,
+        authorType: true,
+        tag: true,
+        photoUrl: true,
+        verified: true,
+        reviewDate: true,
+        createdAt: true,
+      },
+      orderBy: [{ reviewDate: "desc" }, { createdAt: "desc" }],
+      take: limit,
+    }),
+  );
   const total = reviews.length;
   const average = total ? reviews.reduce((sum: number, review: any) => sum + review.rating, 0) / total : 0;
   const distribution = [5, 4, 3, 2, 1].map((rating) => {
@@ -94,7 +96,9 @@ async function findMatchingCategoryIds(shop: string, productId?: string | null, 
   }
 
   const normalizedHandle = normalizeKey(productHandle);
-  const categories = await categoryClient.findMany({ where: { shop } });
+  const categories = await runDatabaseRead<any[]>("reviews API categories query", () =>
+    categoryClient.findMany({ where: { shop } }),
+  );
 
   return categories
     .filter((category: any) => {
@@ -120,6 +124,58 @@ function normalizeKey(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+async function runDatabaseRead<T>(label: string, operation: () => Promise<T>) {
+  const maxAttempts = 4;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      console.error(`WOWstampa reviews ${label} failed on attempt ${attempt}`, error);
+
+      if (attempt === maxAttempts || !isRetryableDatabaseError(error)) break;
+      await delay(250 * attempt);
+    }
+  }
+
+  throw lastError;
+}
+
+function isRetryableDatabaseError(error: unknown) {
+  const message = getErrorText(error).toLowerCase();
+  return [
+    "p1001",
+    "p1002",
+    "p1017",
+    "p2024",
+    "p2034",
+    "prepared statement",
+    "can't reach database",
+    "connection",
+    "connect",
+    "closed",
+    "pool",
+    "timeout",
+    "timed out",
+  ].some((token) => message.includes(token));
+}
+
+function getErrorText(error: unknown) {
+  if (!error) return "";
+  if (error instanceof Error) return `${error.name} ${error.message}`;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function emptyReviewsPayload(error?: string) {
   return {
     average: 0,
@@ -137,7 +193,7 @@ function json(body: unknown, status = 200) {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": "no-store",
       "Content-Type": "application/json; charset=utf-8",
     },
   });

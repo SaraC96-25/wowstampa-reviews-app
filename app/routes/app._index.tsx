@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -198,15 +198,17 @@ async function handleAction(request: Request) {
     return { ok: true, message: `${reviews.length} recensioni importate.` } satisfies ActionData;
   }
 
-  const product = parseSelectedProduct(String(formData.get("product") ?? ""));
+  const reviewScope = String(formData.get("reviewScope") ?? "product");
+  const categoryOnly = reviewScope === "category";
+  const product = categoryOnly ? emptyProductOption() : parseSelectedProduct(String(formData.get("product") ?? ""));
   const manualProductHandle = String(formData.get("manualProductHandle") ?? "");
   const manualProductTitle = String(formData.get("manualProductTitle") ?? "");
   const review = normalizeReview({
     shop,
     categoryId: String(formData.get("categoryId") ?? ""),
     productId: product.id,
-    productHandle: product.handle || manualProductHandle,
-    productTitle: product.title || manualProductTitle,
+    productHandle: categoryOnly ? "" : product.handle || manualProductHandle,
+    productTitle: categoryOnly ? "" : product.title || manualProductTitle,
     rating: Number(formData.get("rating") ?? 5),
     title: String(formData.get("title") ?? ""),
     body: String(formData.get("body") ?? ""),
@@ -216,7 +218,7 @@ async function handleAction(request: Request) {
     photoUrl: String(formData.get("photoUrl") ?? ""),
     verified: String(formData.get("verified") ?? "true") === "true",
     published: String(formData.get("published") ?? "true") === "true",
-    source: "manual",
+    source: categoryOnly ? "category" : "manual",
     reviewDate: String(formData.get("reviewDate") ?? ""),
   });
   const errors = validateReview(review);
@@ -233,6 +235,7 @@ async function createReviews(reviews: ProductReviewInput[]) {
     await runDatabaseWrite("reviews full import", () => reviewClient.createMany({ data }));
   } catch (error) {
     console.error("WOWstampa reviews full import failed, retrying legacy payload", error);
+    if (!isLegacySchemaError(error)) throw error;
     await runDatabaseWrite("reviews legacy import", () =>
       reviewClient.createMany({ data: reviews.map(toLegacyReviewInput) }),
     );
@@ -246,6 +249,7 @@ async function createReview(review: ProductReviewInput) {
     );
   } catch (error) {
     console.error("WOWstampa reviews full create failed, retrying legacy payload", error);
+    if (!isLegacySchemaError(error)) throw error;
     await runDatabaseWrite("review legacy create", () =>
       reviewClient.createMany({ data: [toLegacyReviewInput(review)] }),
     );
@@ -340,8 +344,10 @@ async function loadProducts(admin: { graphql: (query: string) => Promise<Respons
 export default function ReviewsAdmin() {
   const { products, reviews, categories, appUrl, shop, loadError } = useLoaderData() as LoaderData;
   const fetcher = useFetcher();
+  const [reviewScope, setReviewScope] = useState<"product" | "category">("product");
   const actionData = fetcher.data as ActionData | undefined;
   const publishedReviews = reviews.filter((review) => review.published);
+  const isCategoryReview = reviewScope === "category";
   const averageRating = useMemo(() => {
     if (!publishedReviews.length) return "0.0";
     const total = publishedReviews.reduce((sum, review) => sum + review.rating, 0);
@@ -396,8 +402,26 @@ export default function ReviewsAdmin() {
               </div>
 
               <label className="reviews-field">
+                <span>Ambito recensione</span>
+                <select
+                  name="reviewScope"
+                  value={reviewScope}
+                  onChange={(event) => setReviewScope(event.currentTarget.value as "product" | "category")}
+                >
+                  <option value="product">Prodotto singolo</option>
+                  <option value="category">Solo categoria</option>
+                </select>
+              </label>
+
+              {isCategoryReview ? (
+                <div className="reviews-notice">
+                  Questa recensione verra mostrata su tutti i prodotti inclusi nella categoria scelta.
+                </div>
+              ) : null}
+
+              <label className="reviews-field">
                 <span>Prodotto</span>
-                <select name="product">
+                <select name="product" disabled={isCategoryReview}>
                   <option value="">Seleziona prodotto</option>
                   {products.map((product) => (
                     <option key={product.id} value={JSON.stringify(product)}>
@@ -406,7 +430,7 @@ export default function ReviewsAdmin() {
                   ))}
                 </select>
               </label>
-              {!products.length ? (
+              {!products.length && !isCategoryReview ? (
                 <div className="reviews-field-grid">
                   <label className="reviews-field">
                     <span>Handle prodotto</span>
@@ -421,7 +445,7 @@ export default function ReviewsAdmin() {
 
               <label className="reviews-field">
                 <span>Categoria recensioni</span>
-                <select name="categoryId">
+                <select name="categoryId" required={isCategoryReview}>
                   <option value="">Nessuna categoria</option>
                   {categories.map((category) => (
                     <option key={category.id} value={category.id}>
@@ -645,8 +669,12 @@ function parseSelectedProduct(value: string): ProductOption {
     const product = JSON.parse(value);
     return { id: String(product.id ?? ""), title: String(product.title ?? ""), handle: String(product.handle ?? "") };
   } catch {
-    return { id: "", title: "", handle: "" };
+    return emptyProductOption();
   }
+}
+
+function emptyProductOption(): ProductOption {
+  return { id: "", title: "", handle: "" };
 }
 
 function normalizeReview(input: ProductReviewInput): ProductReviewInput {
@@ -762,6 +790,7 @@ function isRetryableDatabaseError(error: unknown) {
     "p1017",
     "p2024",
     "p2034",
+    "prepared statement",
     "can't reach database",
     "connection",
     "connect",
@@ -769,6 +798,18 @@ function isRetryableDatabaseError(error: unknown) {
     "pool",
     "timeout",
     "timed out",
+  ].some((token) => message.includes(token));
+}
+
+function isLegacySchemaError(error: unknown) {
+  const message = getErrorText(error).toLowerCase();
+  return [
+    "unknown argument",
+    "unknown field",
+    "does not exist",
+    "column",
+    "categoryid",
+    "reviewdate",
   ].some((token) => message.includes(token));
 }
 
@@ -888,6 +929,7 @@ const styles = `
   .reviews-checks label { align-items: center; display: inline-flex; gap: 7px; }
   .reviews-endpoint { background: #f6f6f7; border-radius: 6px; display: grid; gap: 6px; padding: 10px; }
   .reviews-endpoint code { overflow-wrap: anywhere; }
+  .reviews-notice { background: #edf7f4; border: 1px solid #95c9b4; border-radius: 6px; color: #0c5132; font-size: 13px; font-weight: 700; margin-bottom: 12px; padding: 10px; }
   .reviews-errors { background: #fff4f4; border-color: #fed3d1; color: #8e1f0b; }
   .reviews-errors p { margin: 0; }
   .reviews-success { background: #f1f8f5; border-color: #95c9b4; color: #0c5132; }
