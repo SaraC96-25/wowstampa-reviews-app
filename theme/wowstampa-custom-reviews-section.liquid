@@ -185,10 +185,6 @@
         openReviewModal(card.dataset.wsReviewId);
       });
 
-      root.querySelectorAll('[data-ws-review-modal-close]').forEach(function (button) {
-        button.addEventListener('click', closeReviewModal);
-      });
-
       document.addEventListener('keydown', function (event) {
         if (event.key === 'Escape') closeReviewModal();
       });
@@ -299,18 +295,22 @@
         setModalText('[data-ws-review-modal-date]', relativeDate(review.reviewDate));
 
         modal.hidden = false;
+        modal.removeAttribute('hidden');
         modal.style.display = 'grid';
         document.documentElement.style.overflow = 'hidden';
+        document.body.style.overflow = 'hidden';
         root.classList.add('ws-reviews--modal-open');
         var closeButton = modal.querySelector('[data-ws-review-modal-close]');
         if (closeButton) closeButton.focus();
       }
 
       function closeReviewModal() {
-        if (!modal || modal.hidden) return;
+        if (!modal) return;
         modal.hidden = true;
+        modal.setAttribute('hidden', '');
         modal.style.display = 'none';
         document.documentElement.style.overflow = '';
+        document.body.style.overflow = '';
         root.classList.remove('ws-reviews--modal-open');
       }
 
@@ -323,6 +323,13 @@
         modal.style.display = 'none';
         modal.style.placeItems = 'center';
         modal.style.padding = '20px';
+        modal.addEventListener('click', function (event) {
+          if (event.target.closest('[data-ws-review-modal-close]')) {
+            event.preventDefault();
+            event.stopPropagation();
+            closeReviewModal();
+          }
+        });
 
         var backdrop = modal.querySelector('.ws-review-modal__backdrop');
         if (backdrop) {
@@ -330,6 +337,11 @@
           backdrop.style.inset = '0';
           backdrop.style.background = 'rgba(8, 22, 15, .52)';
           backdrop.style.backdropFilter = 'blur(5px)';
+          backdrop.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            closeReviewModal();
+          });
         }
 
         var dialog = modal.querySelector('.ws-review-modal__dialog');
@@ -361,6 +373,11 @@
           close.style.cursor = 'pointer';
           close.style.fontSize = '24px';
           close.style.lineHeight = '1';
+          close.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            closeReviewModal();
+          });
         }
       }
 
