@@ -180,11 +180,9 @@ async function handleAction(request: Request) {
         ? await (csvFile as any).text()
         : pastedCsv;
     const categories = await loadCategories(shop);
-    const categoriesByKey = new Map<string, string>(
-      categories.map((category: any) => [String(category.key), String(category.id)]),
-    );
+    const categoriesByName = createCategoryLookup(categories);
     const reviews = parseCsv(csvText)
-      .map((row) => rowToReview(row, shop, categoriesByKey))
+      .map((row) => rowToReview(row, shop, categoriesByName))
       .filter((review): review is ProductReviewInput => Boolean(review));
 
     if (!reviews.length) {
@@ -518,7 +516,7 @@ export default function ReviewsAdmin() {
               <p className="reviews-muted">
                 Colonne: product_id, product_handle, product_title, rating, title,
                 body, author_name, author_type, tag, photo_url, verified, published,
-                review_date, category_key.
+                review_date, categoria.
               </p>
               <label className="reviews-field">
                 <span>File CSV</span>
@@ -526,7 +524,7 @@ export default function ReviewsAdmin() {
               </label>
               <label className="reviews-field">
                 <span>Oppure incolla CSV</span>
-                <textarea name="csvText" rows={10} placeholder={"product_handle,rating,title,body,author_name,tag\nbanner-300x100,5,Perfetto,Stampa bellissima,Luca B.,Banner PVC 510g"} />
+                <textarea name="csvText" rows={10} placeholder={"product_id,product_handle,product_title,rating,title,body,author_name,author_type,tag,photo_url,verified,published,review_date,categoria\n,banner-300x100,Banner 300x100,5,Perfetto,Stampa bellissima,Luca B.,Azienda,Banner PVC,,true,true,2026-05-29,Bandiere"} />
               </label>
               <div className="reviews-endpoint">
                 <strong>Endpoint tema</strong>
@@ -833,11 +831,36 @@ function parseBoolean(value: unknown, fallback = true) {
   return ["1", "true", "yes", "si", "sì", "published", "pubblicata"].includes(text);
 }
 
-function rowToReview(row: Record<string, string>, shop: string, categoriesByKey = new Map<string, string>()) {
-  const categoryKey = slugify(row.category_key || row.categoryKey || row.categoria || "");
+function createCategoryLookup(categories: any[]) {
+  const lookup = new Map<string, string>();
+
+  categories.forEach((category) => {
+    const id = String(category.id ?? "");
+    if (!id) return;
+
+    getCategoryLookupKeys(category.key).forEach((key) => lookup.set(key, id));
+    getCategoryLookupKeys(category.name).forEach((key) => lookup.set(key, id));
+  });
+
+  return lookup;
+}
+
+function getCategoryLookupKeys(value: unknown) {
+  const text = String(value ?? "").trim();
+  return [text.toLowerCase(), slugify(text)].filter(Boolean);
+}
+
+function rowToReview(row: Record<string, string>, shop: string, categoriesByName = new Map<string, string>()) {
+  const categoryValue = row.categoria || row.category || row.category_name || row.categoryName || row.category_key || row.categoryKey || "";
+  const categoryId = getCategoryLookupKeys(categoryValue)
+    .map((key) => categoriesByName.get(key))
+    .find(Boolean);
+
+  if (categoryValue && !categoryId) return null;
+
   const review = normalizeReview({
     shop,
-    categoryId: categoryKey ? categoriesByKey.get(categoryKey) : null,
+    categoryId: categoryId ?? null,
     productId: row.product_id || row.productId,
     productHandle: row.product_handle || row.productHandle || row.handle,
     productTitle: row.product_title || row.productTitle || row.product,
