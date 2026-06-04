@@ -154,6 +154,38 @@ async function handleAction(request: Request) {
     return { ok: true, message: "Categoria recensioni salvata." } satisfies ActionData;
   }
 
+  if (intent === "update-category") {
+    const id = String(formData.get("id") ?? "");
+    const name = String(formData.get("categoryName") ?? "").trim();
+    const key = slugify(String(formData.get("categoryKey") ?? "") || name);
+    const productHandles = normalizeListText(formData.get("categoryProductHandles"));
+    const productIds = normalizeListText(formData.get("categoryProductIds"));
+
+    if (!id || !name || !key) {
+      return { ok: false, errors: ["Seleziona una categoria e inserisci nome e chiave."] } satisfies ActionData;
+    }
+
+    try {
+      const result = await runDatabaseWrite<{ count?: number }>("category update", () =>
+        categoryClient.updateMany({
+          where: { id, shop },
+          data: { name, key, productHandles, productIds },
+        }),
+      );
+
+      if (!result.count) {
+        return { ok: false, errors: ["Categoria non trovata."] } satisfies ActionData;
+      }
+    } catch {
+      return {
+        ok: false,
+        errors: ["Categoria non salvata: verifica che la chiave non sia già usata da un'altra categoria."],
+      } satisfies ActionData;
+    }
+
+    return { ok: true, message: "Categoria recensioni aggiornata." } satisfies ActionData;
+  }
+
   if (intent === "delete-category") {
     const id = String(formData.get("id") ?? "");
     await runDatabaseWrite("category delete", () => categoryClient.deleteMany({ where: { id, shop } })).catch(() => null);
@@ -635,15 +667,43 @@ export default function ReviewsAdmin() {
               <div className="reviews-category-list">
                 {categories.map((category) => (
                   <article className="reviews-category-row" key={category.id}>
-                    <div>
-                      <h3>{category.name}</h3>
-                      <small>{category.key}</small>
-                      <p>{category.productHandles || "Nessun handle prodotto"}</p>
-                    </div>
-                    <fetcher.Form action="?index" method="post">
+                    <fetcher.Form action="?index" method="post" className="reviews-category-edit">
+                      <input name="intent" type="hidden" value="update-category" />
+                      <input name="id" type="hidden" value={category.id} />
+                      <div className="reviews-field-grid">
+                        <label className="reviews-field">
+                          <span>Nome categoria</span>
+                          <input name="categoryName" defaultValue={category.name} required />
+                        </label>
+                        <label className="reviews-field">
+                          <span>Chiave categoria</span>
+                          <input name="categoryKey" defaultValue={category.key} required />
+                        </label>
+                      </div>
+                      <label className="reviews-field">
+                        <span>Handle prodotti inclusi</span>
+                        <textarea name="categoryProductHandles" rows={6} defaultValue={category.productHandles} />
+                      </label>
+                      <label className="reviews-field">
+                        <span>ID prodotti inclusi opzionali</span>
+                        <textarea name="categoryProductIds" rows={3} defaultValue={category.productIds} />
+                      </label>
+                      <button className="reviews-button reviews-button--primary" type="submit">Aggiorna categoria</button>
+                    </fetcher.Form>
+                    <fetcher.Form action="?index" method="post" className="reviews-category-delete">
                       <input name="intent" type="hidden" value="delete-category" />
                       <input name="id" type="hidden" value={category.id} />
-                      <button className="reviews-button reviews-button--danger" type="submit">Elimina</button>
+                      <button
+                        className="reviews-button reviews-button--danger"
+                        type="submit"
+                        onClick={(event) => {
+                          if (!window.confirm("Vuoi eliminare questa categoria recensioni?")) {
+                            event.preventDefault();
+                          }
+                        }}
+                      >
+                        Elimina
+                      </button>
                     </fetcher.Form>
                   </article>
                 ))}
@@ -1046,7 +1106,11 @@ const styles = `
   .reviews-category-layout { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1fr); gap: 18px; padding: 18px; }
   .reviews-category-form { border: 1px solid #dfe3e8; border-radius: 8px; padding: 14px; }
   .reviews-category-list { display: grid; gap: 10px; align-content: start; }
-  .reviews-category-row { align-items: center; border: 1px solid #dfe3e8; border-radius: 8px; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; padding: 14px; }
+  .reviews-category-row { align-items: start; border: 1px solid #dfe3e8; border-radius: 8px; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; padding: 14px; }
+  .reviews-category-edit { display: grid; gap: 10px; }
+  .reviews-category-edit .reviews-field { margin-bottom: 0; }
+  .reviews-category-edit .reviews-button { justify-self: start; }
+  .reviews-category-delete { padding-top: 25px; }
   .reviews-category-row h3 { margin: 0; }
   .reviews-category-row p { margin: 6px 0 0; white-space: pre-line; }
   .reviews-list { display: grid; }
