@@ -34,6 +34,9 @@ type ReviewCategorySummary = {
 type LoaderData = {
   products: ProductOption[];
   reviews: ReviewSummary[];
+  reviewPage: number;
+  reviewPageSize: number;
+  reviewTotal: number;
   categories: ReviewCategorySummary[];
   appUrl: string;
   shop: string;
@@ -79,15 +82,21 @@ const PRODUCTS_QUERY = `#graphql
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const appUrl = process.env.SHOPIFY_APP_URL ?? "";
+  const url = new URL(request.url);
+  const reviewPageSize = 50;
+  const reviewPage = Math.max(1, Number(url.searchParams.get("reviewPage") ?? 1) || 1);
 
   try {
     const { shop, products } = await getShopContext(request);
-    const reviews = await loadReviews(shop);
+    const reviewResult = await loadReviews(shop, reviewPage, reviewPageSize);
     const categories = await loadCategories(shop);
 
     return {
       products,
-      reviews: reviews.map(mapReview),
+      reviews: reviewResult.reviews.map(mapReview),
+      reviewPage,
+      reviewPageSize,
+      reviewTotal: reviewResult.total,
       categories: categories.map(mapCategory),
       appUrl,
       shop,
@@ -97,6 +106,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return {
       products: [],
       reviews: [],
+      reviewPage,
+      reviewPageSize,
+      reviewTotal: 0,
       categories: [],
       appUrl,
       shop: fallbackShop,
@@ -359,45 +371,57 @@ async function deleteDuplicateCategoryReviews(shop: string) {
   return Number(result.count ?? duplicateIds.length);
 }
 
-async function loadReviews(shop: string): Promise<any[]> {
+async function loadReviews(shop: string, page: number, pageSize: number): Promise<{ reviews: any[]; total: number }> {
+  const skip = Math.max(0, (page - 1) * pageSize);
+
   try {
-    return await runDatabaseWrite("reviews category query", () =>
-      reviewClient.findMany({
-        where: { shop },
-        include: { category: true },
-        orderBy: [{ published: "desc" }, { createdAt: "desc" }],
-        take: 100,
-      }),
+    const [reviews, total] = await runDatabaseWrite<[any[], number]>("reviews category query", () =>
+      Promise.all([
+        reviewClient.findMany({
+          where: { shop },
+          include: { category: true },
+          orderBy: [{ published: "desc" }, { createdAt: "desc" }],
+          skip,
+          take: pageSize,
+        }),
+        reviewClient.count({ where: { shop } }),
+      ]),
     );
+    return { reviews, total };
   } catch (error) {
     console.error("WOWstampa reviews category query failed", error);
     try {
-      return await runDatabaseWrite("reviews fallback query", () =>
-        reviewClient.findMany({
-          where: { shop },
-          select: {
-            id: true,
-            productId: true,
-            productHandle: true,
-            productTitle: true,
-            rating: true,
-            title: true,
-            body: true,
-            authorName: true,
-            authorType: true,
-            tag: true,
-            photoUrl: true,
-            verified: true,
-            published: true,
-            reviewDate: true,
-          },
-          orderBy: [{ published: "desc" }, { createdAt: "desc" }],
-          take: 100,
-        }),
+      const [reviews, total] = await runDatabaseWrite<[any[], number]>("reviews fallback query", () =>
+        Promise.all([
+          reviewClient.findMany({
+            where: { shop },
+            select: {
+              id: true,
+              productId: true,
+              productHandle: true,
+              productTitle: true,
+              rating: true,
+              title: true,
+              body: true,
+              authorName: true,
+              authorType: true,
+              tag: true,
+              photoUrl: true,
+              verified: true,
+              published: true,
+              reviewDate: true,
+            },
+            orderBy: [{ published: "desc" }, { createdAt: "desc" }],
+            skip,
+            take: pageSize,
+          }),
+          reviewClient.count({ where: { shop } }),
+        ]),
       );
+      return { reviews, total };
     } catch (fallbackError) {
       console.error("WOWstampa reviews fallback query failed", fallbackError);
-      return [];
+      return { reviews: [], total: 0 };
     }
   }
 }
@@ -445,12 +469,16 @@ async function loadProducts(admin: { graphql: (query: string) => Promise<Respons
 }
 
 export default function ReviewsAdmin() {
-  const { products, reviews, categories, appUrl, shop, loadError } = useLoaderData() as LoaderData;
+  const { products, reviews, reviewPage, reviewPageSize, reviewTotal, categories, appUrl, shop, loadError } =
+    useLoaderData() as LoaderData;
   const fetcher = useFetcher();
   const [reviewScope, setReviewScope] = useState<"product" | "category">("product");
   const actionData = fetcher.data as ActionData | undefined;
   const publishedReviews = reviews.filter((review) => review.published);
   const isCategoryReview = reviewScope === "category";
+  const reviewTotalPages = Math.max(1, Math.ceil(reviewTotal / reviewPageSize));
+  const reviewStart = reviewTotal ? (reviewPage - 1) * reviewPageSize + 1 : 0;
+  const reviewEnd = Math.min(reviewPage * reviewPageSize, reviewTotal);
   const averageRating = useMemo(() => {
     if (!publishedReviews.length) return "0.0";
     const total = publishedReviews.reduce((sum, review) => sum + review.rating, 0);
@@ -729,7 +757,9 @@ export default function ReviewsAdmin() {
             <div className="reviews-panel__head">
               <h2>Recensioni salvate</h2>
               <div className="reviews-panel__actions">
-                <span className="reviews-muted">{reviews.length} totali</span>
+                <span className="reviews-muted">
+                  {reviewStart}-{reviewEnd} di {reviewTotal} totali
+                </span>
                 <fetcher.Form action="?index" method="post">
                   <input name="intent" type="hidden" value="dedupe-category-reviews" />
                   <button
@@ -773,6 +803,23 @@ export default function ReviewsAdmin() {
               ))}
               {!reviews.length ? <p className="reviews-muted reviews-empty-list">Ancora nessuna recensione salvata.</p> : null}
             </div>
+            {reviewTotalPages > 1 ? (
+              <nav className="reviews-pagination" aria-label="Paginazione recensioni">
+                {reviewPage > 1 ? (
+                  <a className="reviews-button" href={`?reviewPage=${reviewPage - 1}`}>Precedenti</a>
+                ) : (
+                  <span className="reviews-button is-disabled">Precedenti</span>
+                )}
+                <span className="reviews-muted">
+                  Pagina {reviewPage} di {reviewTotalPages}
+                </span>
+                {reviewPage < reviewTotalPages ? (
+                  <a className="reviews-button" href={`?reviewPage=${reviewPage + 1}`}>Successive</a>
+                ) : (
+                  <span className="reviews-button is-disabled">Successive</span>
+                )}
+              </nav>
+            ) : null}
           </section>
         </div>
       </s-section>
@@ -1103,6 +1150,8 @@ const styles = `
   .reviews-field span { color: #6d7175; font-size: 11px; font-weight: 750; text-transform: uppercase; }
   .reviews-field input, .reviews-field select, .reviews-field textarea { border: 1px solid #c9cccf; border-radius: 6px; box-sizing: border-box; font: inherit; min-height: 36px; padding: 7px 10px; width: 100%; }
   .reviews-button { background: #fff; border: 1px solid #8c9196; border-radius: 6px; color: #202223; cursor: pointer; font: inherit; font-weight: 700; min-height: 36px; padding: 7px 12px; }
+  a.reviews-button { align-items: center; display: inline-flex; text-decoration: none; }
+  .reviews-button.is-disabled { color: #8c9196; cursor: default; opacity: .55; }
   .reviews-button--primary { background: #008060; border-color: #008060; color: #fff; }
   .reviews-button--danger { border-color: #d72c0d; color: #d72c0d; }
   .reviews-checks { display: flex; gap: 18px; font-weight: 700; }
@@ -1133,6 +1182,7 @@ const styles = `
   .reviews-row img, .reviews-photo-empty { border-radius: 8px; height: 74px; object-fit: cover; width: 110px; }
   .reviews-photo-empty { align-items: center; background: #f6f6f7; color: #6d7175; display: flex; justify-content: center; font-size: 12px; font-weight: 700; }
   .reviews-row-actions { display: flex; gap: 8px; }
+  .reviews-pagination { align-items: center; border-top: 1px solid #dfe3e8; display: flex; gap: 12px; justify-content: center; padding: 16px 18px; }
   .reviews-empty-list { padding: 18px; }
   @media (max-width: 900px) { .reviews-hero, .reviews-grid, .reviews-category-layout, .reviews-category-row, .reviews-row { grid-template-columns: 1fr; display: grid; } .reviews-field-grid { grid-template-columns: 1fr; } }
 `;
