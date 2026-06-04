@@ -223,9 +223,11 @@ async function handleAction(request: Request) {
         : pastedCsv;
     const categories = await loadCategories(shop);
     const categoriesByName = createCategoryLookup(categories);
-    const reviews = parseCsv(csvText)
+    const rows = parseCsv(csvText);
+    const reviews = rows
       .map((row) => rowToReview(row, shop, categoriesByName))
       .filter((review): review is ProductReviewInput => Boolean(review));
+    const skippedRows = rows.length - reviews.length;
 
     if (!reviews.length) {
       return {
@@ -235,7 +237,12 @@ async function handleAction(request: Request) {
     }
 
     await createReviews(reviews);
-    return { ok: true, message: `${reviews.length} recensioni importate.` } satisfies ActionData;
+    return {
+      ok: true,
+      message: skippedRows
+        ? `${reviews.length} recensioni importate. ${skippedRows} righe ignorate perché non valide o con categoria non trovata.`
+        : `${reviews.length} recensioni importate.`,
+    } satisfies ActionData;
   }
 
   const reviewScope = String(formData.get("reviewScope") ?? "product");
@@ -270,15 +277,21 @@ async function handleAction(request: Request) {
 
 async function createReviews(reviews: ProductReviewInput[]) {
   const data = reviews.map(stripEmptyCategoryId);
+  const batchSize = 50;
 
   try {
-    await runDatabaseWrite("reviews full import", () => reviewClient.createMany({ data }));
+    for (let index = 0; index < data.length; index += batchSize) {
+      const batch = data.slice(index, index + batchSize);
+      await runDatabaseWrite("reviews full import", () => reviewClient.createMany({ data: batch }));
+    }
   } catch (error) {
     console.error("WOWstampa reviews full import failed, retrying legacy payload", error);
     if (!isLegacySchemaError(error)) throw error;
-    await runDatabaseWrite("reviews legacy import", () =>
-      reviewClient.createMany({ data: reviews.map(toLegacyReviewInput) }),
-    );
+    const legacyData = reviews.map(toLegacyReviewInput);
+    for (let index = 0; index < legacyData.length; index += batchSize) {
+      const batch = legacyData.slice(index, index + batchSize);
+      await runDatabaseWrite("reviews legacy import", () => reviewClient.createMany({ data: batch }));
+    }
   }
 }
 
@@ -1023,9 +1036,9 @@ function rowToReview(row: Record<string, string>, shop: string, categoriesByName
 }
 
 function parseCsv(csv: string) {
-  const rows = csvToRows(csv.trim());
+  const rows = csvToRows(csv.replace(/^\uFEFF/, "").trim());
   if (rows.length < 2) return [];
-  const headers = rows[0].map((header) => header.trim());
+  const headers = rows[0].map((header) => header.replace(/^\uFEFF/, "").trim());
   return rows.slice(1).map((row) =>
     headers.reduce<Record<string, string>>((result, header, index) => {
       result[header] = row[index]?.trim() ?? "";
