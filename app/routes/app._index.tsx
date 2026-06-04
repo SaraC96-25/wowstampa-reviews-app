@@ -172,6 +172,16 @@ async function handleAction(request: Request) {
     } satisfies ActionData;
   }
 
+  if (intent === "dedupe-category-reviews") {
+    const deletedCount = await deleteDuplicateCategoryReviews(shop);
+    return {
+      ok: true,
+      message: deletedCount
+        ? `${deletedCount} recensioni doppie eliminate.`
+        : "Nessuna recensione doppia trovata nelle categorie.",
+    } satisfies ActionData;
+  }
+
   if (intent === "import") {
     const csvFile = formData.get("csvFile");
     const pastedCsv = String(formData.get("csvText") ?? "").trim();
@@ -252,6 +262,56 @@ async function createReview(review: ProductReviewInput) {
       reviewClient.createMany({ data: [toLegacyReviewInput(review)] }),
     );
   }
+}
+
+async function deleteDuplicateCategoryReviews(shop: string) {
+  const reviews = await runDatabaseWrite<any[]>("duplicate category reviews query", () =>
+    reviewClient.findMany({
+      where: {
+        shop,
+        categoryId: { not: null },
+      },
+      select: {
+        id: true,
+        categoryId: true,
+        title: true,
+        body: true,
+        authorName: true,
+        createdAt: true,
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    }),
+  );
+  const seen = new Set<string>();
+  const duplicateIds: string[] = [];
+
+  reviews.forEach((review: any) => {
+    const key = [
+      review.categoryId,
+      normalizeDuplicateText(review.title),
+      normalizeDuplicateText(review.body),
+      normalizeDuplicateText(review.authorName),
+    ].join("::");
+
+    if (seen.has(key)) {
+      duplicateIds.push(String(review.id));
+    } else {
+      seen.add(key);
+    }
+  });
+
+  if (!duplicateIds.length) return 0;
+
+  const result = await runDatabaseWrite<{ count?: number }>("duplicate category reviews delete", () =>
+    reviewClient.deleteMany({
+      where: {
+        shop,
+        id: { in: duplicateIds },
+      },
+    }),
+  );
+
+  return Number(result.count ?? duplicateIds.length);
 }
 
 async function loadReviews(shop: string): Promise<any[]> {
@@ -595,7 +655,23 @@ export default function ReviewsAdmin() {
           <section className="reviews-panel reviews-panel--wide">
             <div className="reviews-panel__head">
               <h2>Recensioni salvate</h2>
-              <span className="reviews-muted">{reviews.length} totali</span>
+              <div className="reviews-panel__actions">
+                <span className="reviews-muted">{reviews.length} totali</span>
+                <fetcher.Form action="?index" method="post">
+                  <input name="intent" type="hidden" value="dedupe-category-reviews" />
+                  <button
+                    className="reviews-button reviews-button--danger"
+                    type="submit"
+                    onClick={(event) => {
+                      if (!window.confirm("Vuoi cancellare le recensioni doppie presenti nella stessa categoria?")) {
+                        event.preventDefault();
+                      }
+                    }}
+                  >
+                    Cancella doppie categoria
+                  </button>
+                </fetcher.Form>
+              </div>
             </div>
             <div className="reviews-list">
               {reviews.map((review) => (
@@ -717,6 +793,13 @@ function toLegacyReviewInput(review: ProductReviewInput) {
     verified: review.verified,
     published: review.published,
   };
+}
+
+function normalizeDuplicateText(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
 function validateReview(review: ProductReviewInput) {
@@ -940,6 +1023,7 @@ const styles = `
   .reviews-stat strong { font-size: 28px; }
   .reviews-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, .8fr); gap: 18px; align-items: start; }
   .reviews-panel__head { align-items: center; display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .reviews-panel__actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
   .reviews-field, .reviews-field-grid { display: grid; gap: 7px; }
   .reviews-field { margin-bottom: 12px; }
   .reviews-field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
