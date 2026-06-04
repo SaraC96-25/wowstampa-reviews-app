@@ -120,6 +120,33 @@
         </div>
       </div>
     </div>
+
+    <div class="ws-photo-modal" data-ws-photo-modal hidden>
+      <div class="ws-photo-modal__backdrop" data-ws-photo-modal-close></div>
+      <div class="ws-photo-modal__dialog" role="dialog" aria-modal="true" aria-label="Foto recensione cliente">
+        <button class="ws-photo-modal__close" type="button" data-ws-photo-modal-close aria-label="Chiudi foto">×</button>
+        <button class="ws-photo-modal__nav ws-photo-modal__nav--prev" type="button" data-ws-photo-prev aria-label="Foto precedente">‹</button>
+        <div class="ws-photo-modal__media">
+          <img data-ws-photo-main alt="Foto caricata da un cliente" loading="lazy">
+        </div>
+        <button class="ws-photo-modal__nav ws-photo-modal__nav--next" type="button" data-ws-photo-next aria-label="Foto successiva">›</button>
+        <aside class="ws-photo-modal__review">
+          <div class="ws-photo-modal__top">
+            <span data-ws-photo-stars></span>
+            <strong><span data-ws-photo-rating></span> su 5</strong>
+          </div>
+          <span class="ws-photo-modal__verified" data-ws-photo-verified></span>
+          <h3 data-ws-photo-title></h3>
+          <p data-ws-photo-body></p>
+          <div class="ws-photo-modal__meta">
+            <strong data-ws-photo-author></strong>
+            <span data-ws-photo-tag></span>
+            <time data-ws-photo-date></time>
+          </div>
+          <div class="ws-photo-modal__thumbs" data-ws-photo-thumbs aria-label="Altre foto della stessa recensione"></div>
+        </aside>
+      </div>
+    </div>
   </section>
 
   <script>
@@ -134,6 +161,7 @@
       var productHandle = root.dataset.productHandle;
       var cards = root.querySelector('[data-ws-review-cards]');
       var modal = root.querySelector('[data-ws-review-modal]');
+      var photoModal = root.querySelector('[data-ws-photo-modal]');
       var slidePrevious = root.querySelector('[data-ws-slide-prev]');
       var slideNext = root.querySelector('[data-ws-slide-next]');
       var starUrls = {
@@ -144,9 +172,12 @@
       var allReviews = [];
       var activeFilter = 'all';
       var activeRating = null;
+      var photoItems = [];
+      var activePhotoIndex = 0;
 
       if (!endpoint || !cards) return;
       prepareReviewModal();
+      preparePhotoModal();
 
       var url = new URL(endpoint, window.location.origin);
       url.searchParams.set('shop', shop);
@@ -195,6 +226,15 @@
         });
       });
 
+      var gallery = root.querySelector('[data-ws-gallery]');
+      if (gallery) {
+        gallery.addEventListener('click', function (event) {
+          var photo = event.target.closest('[data-ws-photo-index]');
+          if (!photo) return;
+          openPhotoModal(Number(photo.dataset.wsPhotoIndex || 0));
+        });
+      }
+
       if (slidePrevious) {
         slidePrevious.addEventListener('click', function () {
           scrollReviews(-1);
@@ -223,7 +263,13 @@
       });
 
       document.addEventListener('keydown', function (event) {
-        if (event.key === 'Escape') closeReviewModal();
+        if (event.key === 'Escape') {
+          closePhotoModal();
+          closeReviewModal();
+        }
+        if (!photoModal || photoModal.hidden) return;
+        if (event.key === 'ArrowLeft') showAdjacentPhoto(-1);
+        if (event.key === 'ArrowRight') showAdjacentPhoto(1);
       });
 
       function updateSummary(data) {
@@ -251,23 +297,26 @@
         var gallery = root.querySelector('[data-ws-gallery]');
         if (!gallery) return;
 
-        var photos = reviews.filter(function (review) { return review.photoUrl; });
-        root.classList.toggle('ws-reviews--no-photos', photos.length === 0);
+        photoItems = getPhotoItems(reviews);
+        root.classList.toggle('ws-reviews--no-photos', photoItems.length === 0);
 
-        if (!photos.length) {
+        if (!photoItems.length) {
           gallery.hidden = true;
           gallery.innerHTML = '';
           return;
         }
 
         gallery.hidden = false;
-        var firstPhotos = photos.slice(0, 3);
+        var firstPhotos = photoItems.slice(0, 3);
         gallery.innerHTML = '';
 
-        firstPhotos.forEach(function (review, index) {
-          var photo = document.createElement('div');
+        firstPhotos.forEach(function (item, index) {
+          var photo = document.createElement('button');
+          photo.type = 'button';
           photo.className = 'ws-reviews__photo' + (index === 0 ? ' ws-reviews__photo--large' : index === 1 ? ' ws-reviews__photo--wide' : '');
-          photo.style.backgroundImage = 'linear-gradient(180deg, rgba(8,18,25,.08), rgba(8,18,25,.16)), url("' + escapeAttribute(review.photoUrl) + '")';
+          photo.dataset.wsPhotoIndex = String(item.photoIndex);
+          photo.setAttribute('aria-label', 'Apri foto recensione di ' + item.review.authorName);
+          photo.style.backgroundImage = 'linear-gradient(180deg, rgba(8,18,25,.08), rgba(8,18,25,.16)), url("' + escapeAttribute(item.url) + '")';
           gallery.appendChild(photo);
         });
 
@@ -277,9 +326,12 @@
           gallery.appendChild(emptyPhoto);
         }
 
-        var count = document.createElement('div');
+        var count = document.createElement('button');
+        count.type = 'button';
         count.className = 'ws-reviews__photo ws-reviews__photo--count';
-        count.innerHTML = '<strong>+' + photos.length + '</strong><span>Foto dei clienti</span>';
+        count.dataset.wsPhotoIndex = '0';
+        count.setAttribute('aria-label', 'Apri gallery foto clienti');
+        count.innerHTML = '<strong>+' + photoItems.length + '</strong><span>Foto dei clienti</span>';
         gallery.appendChild(count);
       }
 
@@ -349,6 +401,136 @@
           var isActive = activeRating === Number(button.dataset.wsRatingFilter || 0);
           button.classList.toggle('is-active', isActive);
           button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
+      }
+
+      function getPhotoItems(reviews) {
+        var items = [];
+        reviews.forEach(function (review) {
+          reviewPhotos(review).forEach(function (url) {
+            items.push({
+              photoIndex: items.length,
+              review: review,
+              url: url
+            });
+          });
+        });
+        return items;
+      }
+
+      function reviewPhotos(review) {
+        return String(review.photoUrl || '')
+          .split(/[\n;,]+/)
+          .map(function (url) { return url.trim(); })
+          .filter(Boolean);
+      }
+
+      function openPhotoModal(index) {
+        if (!photoModal || !photoItems.length) return;
+        activePhotoIndex = Math.max(0, Math.min(photoItems.length - 1, Number(index) || 0));
+        renderPhotoModal();
+        photoModal.hidden = false;
+        photoModal.removeAttribute('hidden');
+        photoModal.style.display = 'grid';
+        document.documentElement.style.overflow = 'hidden';
+        document.body.style.overflow = 'hidden';
+        root.classList.add('ws-reviews--photo-modal-open');
+        var closeButton = photoModal.querySelector('[data-ws-photo-modal-close]');
+        if (closeButton) closeButton.focus();
+      }
+
+      function renderPhotoModal() {
+        if (!photoModal || !photoItems.length) return;
+        var item = photoItems[activePhotoIndex];
+        if (!item) return;
+        var review = item.review;
+        var rating = Number(review.rating || 0);
+        var mainImage = photoModal.querySelector('[data-ws-photo-main]');
+        var thumbs = photoModal.querySelector('[data-ws-photo-thumbs]');
+        var reviewItems = photoItems.filter(function (photo) {
+          return String(photo.review.id) === String(review.id);
+        });
+
+        if (mainImage) {
+          mainImage.src = item.url;
+          mainImage.alt = review.title ? 'Foto recensione: ' + review.title : 'Foto recensione cliente';
+        }
+
+        setPhotoHtml('[data-ws-photo-stars]', trustStarsMarkup(rating, 'ws-photo-modal__stars'));
+        setPhotoText('[data-ws-photo-rating]', rating.toFixed(1));
+        setPhotoText('[data-ws-photo-verified]', review.verified ? '✓ Recensione verificata' : '');
+        setPhotoText('[data-ws-photo-title]', review.title);
+        setPhotoText('[data-ws-photo-body]', review.body);
+        setPhotoText('[data-ws-photo-author]', review.authorName);
+        setPhotoText('[data-ws-photo-tag]', review.tag || review.authorType || '');
+        setPhotoText('[data-ws-photo-date]', relativeDate(review.reviewDate));
+        togglePhotoElement('[data-ws-photo-verified]', Boolean(review.verified));
+        togglePhotoElement('[data-ws-photo-tag]', Boolean(review.tag || review.authorType));
+        togglePhotoElement('[data-ws-photo-date]', Boolean(relativeDate(review.reviewDate)));
+
+        if (thumbs) {
+          thumbs.innerHTML = reviewItems.map(function (photo) {
+            return (
+              '<button type="button" data-ws-photo-thumb-index="' + photo.photoIndex + '" class="' + (photo.photoIndex === activePhotoIndex ? 'is-active' : '') + '" aria-label="Mostra questa foto">' +
+                '<img src="' + escapeAttribute(photo.url) + '" alt="" loading="lazy">' +
+              '</button>'
+            );
+          }).join('');
+          thumbs.hidden = reviewItems.length <= 1;
+        }
+
+        updatePhotoNavState();
+      }
+
+      function showAdjacentPhoto(direction) {
+        if (!photoItems.length) return;
+        activePhotoIndex = (activePhotoIndex + direction + photoItems.length) % photoItems.length;
+        renderPhotoModal();
+      }
+
+      function updatePhotoNavState() {
+        if (!photoModal) return;
+        photoModal.querySelectorAll('[data-ws-photo-prev], [data-ws-photo-next]').forEach(function (button) {
+          button.disabled = photoItems.length <= 1;
+        });
+      }
+
+      function closePhotoModal() {
+        if (!photoModal || photoModal.hidden) return;
+        photoModal.hidden = true;
+        photoModal.setAttribute('hidden', '');
+        photoModal.style.display = 'none';
+        document.documentElement.style.overflow = '';
+        document.body.style.overflow = '';
+        root.classList.remove('ws-reviews--photo-modal-open');
+      }
+
+      function preparePhotoModal() {
+        if (!photoModal) return;
+        document.body.appendChild(photoModal);
+        photoModal.addEventListener('click', function (event) {
+          if (event.target.closest('[data-ws-photo-modal-close]')) {
+            event.preventDefault();
+            event.stopPropagation();
+            closePhotoModal();
+          }
+
+          if (event.target.closest('[data-ws-photo-prev]')) {
+            event.preventDefault();
+            showAdjacentPhoto(-1);
+          }
+
+          if (event.target.closest('[data-ws-photo-next]')) {
+            event.preventDefault();
+            showAdjacentPhoto(1);
+          }
+
+          var thumb = event.target.closest('[data-ws-photo-thumb-index]');
+          if (thumb) {
+            event.preventDefault();
+            activePhotoIndex = Number(thumb.dataset.wsPhotoThumbIndex || activePhotoIndex);
+            renderPhotoModal();
+          }
         });
       }
 
@@ -460,6 +642,21 @@
       function setModalHtml(selector, html) {
         var element = modal ? modal.querySelector(selector) : null;
         if (element) element.innerHTML = html || '';
+      }
+
+      function setPhotoText(selector, text) {
+        var element = photoModal ? photoModal.querySelector(selector) : null;
+        if (element) element.textContent = text || '';
+      }
+
+      function setPhotoHtml(selector, html) {
+        var element = photoModal ? photoModal.querySelector(selector) : null;
+        if (element) element.innerHTML = html || '';
+      }
+
+      function togglePhotoElement(selector, visible) {
+        var element = photoModal ? photoModal.querySelector(selector) : null;
+        if (element) element.hidden = !visible;
       }
 
       function setText(selector, text) {
@@ -783,10 +980,24 @@
 
   .ws-reviews__photo {
     min-height: 110px;
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
     border-radius: 11px;
     background-position: center;
     background-size: cover;
+    cursor: pointer;
+    font: inherit;
     overflow: hidden;
+    transition: box-shadow .18s ease, transform .18s ease;
+  }
+
+  .ws-reviews__photo:hover,
+  .ws-reviews__photo:focus-visible {
+    box-shadow: 0 16px 28px rgba(10, 48, 24, .16);
+    outline: none;
+    transform: translateY(-1px);
   }
 
   .ws-reviews__photo--large {
@@ -800,6 +1011,8 @@
 
   .ws-reviews__photo--empty {
     background: linear-gradient(135deg, #d7eee0, #f4fff8 42%, #10b955);
+    cursor: default;
+    pointer-events: none;
   }
 
   .ws-reviews__photo--count {
@@ -1139,6 +1352,204 @@
     font-weight: 900;
   }
 
+  .ws-photo-modal[hidden] {
+    display: none;
+  }
+
+  .ws-photo-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 999999;
+    display: grid;
+    place-items: center;
+    padding: 22px;
+  }
+
+  .ws-photo-modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(5, 18, 12, .68);
+    backdrop-filter: blur(6px);
+  }
+
+  .ws-photo-modal__dialog {
+    position: relative;
+    z-index: 1;
+    width: min(1180px, 100%);
+    max-height: min(820px, calc(100vh - 44px));
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+    overflow: hidden;
+    border: 1px solid rgba(219, 236, 226, .5);
+    border-radius: 20px;
+    background: #ffffff;
+    box-shadow: 0 30px 90px rgba(0, 0, 0, .34);
+  }
+
+  .ws-photo-modal__media {
+    min-height: 560px;
+    display: grid;
+    place-items: center;
+    background: radial-gradient(circle at top left, rgba(18, 201, 93, .16), transparent 34%), #08150f;
+  }
+
+  .ws-photo-modal__media img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-height: min(820px, calc(100vh - 44px));
+    object-fit: contain;
+  }
+
+  .ws-photo-modal__review {
+    display: grid;
+    align-content: start;
+    gap: 14px;
+    max-height: min(820px, calc(100vh - 44px));
+    overflow: auto;
+    padding: 28px;
+    color: #17281f;
+  }
+
+  .ws-photo-modal__close,
+  .ws-photo-modal__nav {
+    position: absolute;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid rgba(220, 235, 227, .9);
+    background: #ffffff;
+    color: #173323;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 900;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, .18);
+  }
+
+  .ws-photo-modal__close {
+    top: 16px;
+    right: 16px;
+    width: 38px;
+    height: 38px;
+    font-size: 25px;
+    line-height: 1;
+  }
+
+  .ws-photo-modal__nav {
+    top: 50%;
+    width: 44px;
+    height: 44px;
+    color: #0b8f43;
+    font-size: 34px;
+    line-height: 1;
+    transform: translateY(-50%);
+  }
+
+  .ws-photo-modal__nav--prev {
+    left: 18px;
+  }
+
+  .ws-photo-modal__nav--next {
+    right: 398px;
+  }
+
+  .ws-photo-modal__nav:disabled {
+    cursor: default;
+    opacity: .35;
+  }
+
+  .ws-photo-modal__top {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    padding-right: 42px;
+  }
+
+  .ws-photo-modal__top strong {
+    color: #4e6257;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .ws-photo-modal__verified {
+    width: fit-content;
+    display: inline-flex;
+    align-items: center;
+    min-height: 30px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    color: #05883d;
+    background: #eaf9f0;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .ws-photo-modal__review h3 {
+    margin: 2px 0 0;
+    color: #17281f;
+    font-size: 24px;
+    line-height: 1.22;
+  }
+
+  .ws-photo-modal__review p {
+    margin: 0;
+    color: #25392d;
+    font-size: 15px;
+    line-height: 1.58;
+    white-space: pre-line;
+  }
+
+  .ws-photo-modal__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 9px;
+    align-items: center;
+    color: #64756b;
+    font-size: 13px;
+  }
+
+  .ws-photo-modal__meta span {
+    border-radius: 999px;
+    padding: 5px 9px;
+    color: #05883d;
+    background: #eaf9f0;
+    font-weight: 900;
+  }
+
+  .ws-photo-modal__thumbs {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .ws-photo-modal__thumbs button {
+    flex: 0 0 64px;
+    width: 64px;
+    height: 64px;
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: 10px;
+    background: #f3f8f5;
+    cursor: pointer;
+    overflow: hidden;
+  }
+
+  .ws-photo-modal__thumbs button.is-active {
+    border-color: #13b957;
+  }
+
+  .ws-photo-modal__thumbs img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
   .ws-reviews__cta {
     width: fit-content;
     min-height: 48px;
@@ -1168,6 +1579,23 @@
 
     .ws-reviews__cards {
       grid-auto-columns: calc((100% - 14px) / 2);
+    }
+
+    .ws-photo-modal__dialog {
+      grid-template-columns: 1fr;
+      overflow: auto;
+    }
+
+    .ws-photo-modal__media {
+      min-height: 420px;
+    }
+
+    .ws-photo-modal__review {
+      max-height: none;
+    }
+
+    .ws-photo-modal__nav--next {
+      right: 18px;
     }
   }
 
@@ -1403,6 +1831,59 @@
 
     .ws-review-modal {
       padding: 12px;
+    }
+
+    .ws-photo-modal {
+      padding: 10px;
+    }
+
+    .ws-photo-modal__dialog {
+      max-height: calc(100vh - 20px);
+      border-radius: 15px;
+    }
+
+    .ws-photo-modal__media {
+      min-height: 300px;
+      max-height: 46vh;
+    }
+
+    .ws-photo-modal__media img {
+      max-height: 46vh;
+    }
+
+    .ws-photo-modal__review {
+      gap: 10px;
+      padding: 18px;
+    }
+
+    .ws-photo-modal__top {
+      padding-right: 42px;
+    }
+
+    .ws-photo-modal__review h3 {
+      font-size: 20px;
+    }
+
+    .ws-photo-modal__review p {
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .ws-photo-modal__nav {
+      width: 38px;
+      height: 38px;
+      font-size: 28px;
+    }
+
+    .ws-photo-modal__close {
+      top: 12px;
+      right: 12px;
+    }
+
+    .ws-photo-modal__thumbs button {
+      flex-basis: 54px;
+      width: 54px;
+      height: 54px;
     }
 
     .ws-review-modal__dialog {
