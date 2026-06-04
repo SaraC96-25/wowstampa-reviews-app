@@ -103,11 +103,15 @@ async function findMatchingCategoryIds(shop: string, productId?: string | null, 
   return categories
     .filter((category: any) => {
       const ids = splitList(category.productIds);
-      const handles = splitList(category.productHandles).map(normalizeKey);
+      const handles = splitList(category.productHandles).flatMap((handle) => [
+        normalizeKey(handle),
+        normalizeHandleCandidate(handle),
+      ]);
 
       return (
         ids.some((id) => normalizedIds.has(id)) ||
-        (normalizedHandle && handles.includes(normalizedHandle))
+        (normalizedHandle && handles.includes(normalizedHandle)) ||
+        (normalizedHandle && handles.includes(normalizeHandleCandidate(normalizedHandle)))
       );
     })
     .map((category: any) => category.id);
@@ -122,6 +126,15 @@ function splitList(value: unknown) {
 
 function normalizeKey(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
+}
+
+function normalizeHandleCandidate(value: unknown) {
+  return normalizeKey(value)
+    .replace(/[×✕]/g, "x")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 async function runDatabaseRead<T>(label: string, operation: () => Promise<T>) {
