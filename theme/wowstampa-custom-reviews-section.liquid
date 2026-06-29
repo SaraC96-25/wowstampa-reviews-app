@@ -58,7 +58,7 @@
           Basato su <span data-ws-total>0</span> recensioni
         </a>
         <span class="ws-reviews__verified">✓ Recensioni verificate</span>
-        <a class="ws-reviews__collection-link" href="https://help.trustpilot.com/s/article/How-do-we-make-sure-reviews-are-trustworthy?language=it" target="_blank" rel="noopener">
+        <a class="ws-reviews__collection-link" href="https://help.trustpilot.com/s/article/How-do-reviews-get-on-Trustpilot?language=it" target="_blank" rel="noopener">
           Come vengono raccolte le recensioni?
         </a>
       </aside>
@@ -127,7 +127,7 @@
         <button class="ws-photo-modal__close" type="button" data-ws-photo-modal-close aria-label="Chiudi foto">×</button>
         <button class="ws-photo-modal__nav ws-photo-modal__nav--prev" type="button" data-ws-photo-prev aria-label="Foto precedente">‹</button>
         <div class="ws-photo-modal__media">
-          <img data-ws-photo-main alt="Foto caricata da un cliente" loading="lazy">
+          <img data-ws-photo-main alt="Foto caricata da un cliente" loading="lazy" width="1200" height="800">
         </div>
         <button class="ws-photo-modal__nav ws-photo-modal__nav--next" type="button" data-ws-photo-next aria-label="Foto successiva">›</button>
         <aside class="ws-photo-modal__review">
@@ -184,9 +184,8 @@
       url.searchParams.set('productId', productId);
       url.searchParams.set('productHandle', productHandle);
       url.searchParams.set('limit', '50');
-      url.searchParams.set('_ws_t', Date.now().toString());
 
-      fetch(url.toString(), { cache: 'no-store' })
+      fetch(url.toString(), { cache: 'default' })
         .then(function (response) {
           if (!response.ok) throw new Error('Reviews unavailable');
           return response.json();
@@ -1206,6 +1205,7 @@
     line-height: 1.5;
     display: -webkit-box;
     -webkit-line-clamp: 4;
+    line-clamp: 4;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
@@ -1808,6 +1808,7 @@
       font-size: 13px;
       line-height: 1.42;
       -webkit-line-clamp: 3;
+      line-clamp: 3;
     }
 
     .ws-review-card__meta {

@@ -3,6 +3,34 @@ import prisma from "../db.server";
 
 const reviewClient = (prisma as any).productReview;
 const categoryClient = (prisma as any).reviewCategory;
+const REVIEWS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+declare global {
+  // eslint-disable-next-line no-var
+  var wowReviewsApiCache: Map<string, { expiresAt: number; payload: ReviewsPayload }> | undefined;
+}
+
+type ReviewsPayload = {
+  average: number;
+  total: number;
+  distribution: Array<{ rating: number; count: number; percent: number }>;
+  reviews: Array<{
+    id: string;
+    productId: string | null;
+    productHandle: string | null;
+    productTitle: string | null;
+    rating: number;
+    title: string;
+    body: string;
+    authorName: string;
+    authorType: string | null;
+    tag: string | null;
+    photoUrl: string | null;
+    verified: boolean;
+    reviewDate: string;
+  }>;
+  error?: string;
+};
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
@@ -21,6 +49,10 @@ async function loadReviewsResponse(request: Request) {
   const limit = Math.min(Number(url.searchParams.get("limit") ?? 20) || 20, 50);
 
   if (!shop) return json({ reviews: [], error: "Missing shop parameter." }, 400);
+
+  const cacheKey = [shop, productId ?? "", productHandle ?? "", String(limit)].join("::");
+  const cachedPayload = getCachedReviewsPayload(cacheKey);
+  if (cachedPayload) return json(cachedPayload);
 
   const productFilters = [];
   if (productId) {
@@ -62,7 +94,7 @@ async function loadReviewsResponse(request: Request) {
     return { rating, count, percent: total ? Math.round((count / total) * 100) : 0 };
   });
 
-  return json({
+  const payload: ReviewsPayload = {
     average: Number(average.toFixed(1)),
     total,
     distribution,
@@ -81,7 +113,10 @@ async function loadReviewsResponse(request: Request) {
       verified: review.verified,
       reviewDate: review.reviewDate?.toISOString() ?? review.createdAt.toISOString(),
     })),
-  });
+  };
+
+  setCachedReviewsPayload(cacheKey, payload);
+  return json(payload);
 }
 
 async function findMatchingCategoryIds(shop: string, productId?: string | null, productHandle?: string | null) {
@@ -199,6 +234,35 @@ function emptyReviewsPayload(error?: string) {
   };
 }
 
+function getReviewsApiCache() {
+  if (!global.wowReviewsApiCache) {
+    global.wowReviewsApiCache = new Map();
+  }
+
+  return global.wowReviewsApiCache;
+}
+
+function getCachedReviewsPayload(key: string) {
+  const cache = getReviewsApiCache();
+  const hit = cache.get(key);
+  if (!hit) return null;
+
+  if (Date.now() > hit.expiresAt) {
+    cache.delete(key);
+    return null;
+  }
+
+  return hit.payload;
+}
+
+function setCachedReviewsPayload(key: string, payload: ReviewsPayload) {
+  const cache = getReviewsApiCache();
+  cache.set(key, {
+    payload,
+    expiresAt: Date.now() + REVIEWS_CACHE_TTL_MS,
+  });
+}
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -206,7 +270,7 @@ function json(body: unknown, status = 200) {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
-      "Cache-Control": "no-store",
+      "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
       "Content-Type": "application/json; charset=utf-8",
     },
   });
